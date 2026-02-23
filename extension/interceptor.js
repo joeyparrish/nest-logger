@@ -148,8 +148,16 @@
     for (const b of data.updated_buckets || []) {
       buckets[b.object_key] = b.value;
     }
-    console.log(PREFIX, `Response has ${Object.keys(buckets).length} buckets:`,
-      Object.keys(buckets).join(", "));
+    const bucketTypes = [...new Set(Object.keys(buckets).map(k => k.split(".")[0]))];
+    console.log(PREFIX, `Bucket types in response: [${bucketTypes.join(", ")}]`);
+    // Note: the web app's app_launch call typically does NOT request "shared",
+    // "device", or "rcs_settings" bucket types, so thermostats will be empty
+    // in intercepted readings.  The background worker's own poll requests those
+    // types and will populate thermostat data in subsequent readings.
+    if (!bucketTypes.includes("shared")) {
+      console.warn(PREFIX, "No 'shared' buckets in this response — thermostat fields will be empty.",
+        "Thermostat data will appear in background-poll readings (every 5 min).");
+    }
 
     // ── Room name lookup (where.* buckets) ────────────────────────────────
     // Each structure has a "where" bucket listing room names keyed by where_id.

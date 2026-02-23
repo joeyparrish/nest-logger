@@ -244,6 +244,14 @@ function parseNestData(data) {
     return null;
   }
 
+  // Log every bucket key so we can see exactly what the API returned.
+  // Bucket types present tell us which device classes are in the response.
+  // If you see kryptonite.* but no shared.* here, the thermostat data is
+  // not being returned — check that BUCKET_TYPES includes "shared" and "device".
+  const bucketTypes = [...new Set(Object.keys(buckets).map(k => k.split(".")[0]))];
+  console.log(PREFIX, `Bucket types in response: [${bucketTypes.join(", ")}]`);
+  console.log(PREFIX, `All bucket keys: ${Object.keys(buckets).join(", ")}`);
+
   // Room name lookup
   const wheres = {};
   for (const [key, val] of Object.entries(buckets)) {
