@@ -136,12 +136,11 @@ function queryReadings() {
   // Sensors, in the order their names first appear by timestamp so the chart
   // legend is stable across page loads.
   const sensors = db.prepare(`
-    SELECT DISTINCT sensor
+    SELECT sensor
     FROM sensor_readings
     WHERE section = 'TEMPERATURE SENSORS'
+    GROUP BY sensor
     ORDER BY MIN(timestamp), sensor
-    -- MIN(timestamp) in ORDER BY without GROUP BY is a SQLite extension that
-    -- gives the first-seen timestamp per sensor, preserving insertion order.
   `).pluck().all();
 
   // All distinct timestamps in chronological order.
