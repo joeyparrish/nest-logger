@@ -116,13 +116,17 @@ async function poll() {
   console.log(PREFIX, "app_launch response status:", resp.status);
 
   if (resp.status === 401 || resp.status === 403) {
-    // The Nest access token has expired.  Stop polling until the user reloads
-    // the Nest web app, which will trigger a fresh token via the interceptor.
+    // The Nest access token has expired.  Clear the stale credentials and alarm
+    // so we don't keep hammering the API with a dead token.  Then reload the
+    // Nest tab — the page load re-runs the interceptor, which obtains a fresh
+    // token from the web app's own auth flow and posts it back to us, at which
+    // point armAlarm() is called again and polling resumes automatically.
     console.warn(PREFIX,
-      `Credentials expired (HTTP ${resp.status}). Clearing alarm and stored credentials.`,
-      "Reload home.nest.com to resume polling.");
+      `Credentials expired (HTTP ${resp.status}). Clearing alarm and credentials.`,
+      "Reloading home.nest.com to get a fresh token...");
     await chrome.alarms.clear(POLL_ALARM);
     await chrome.storage.local.remove("nestCreds");
+    await reloadNestTab();
     return;
   }
 
@@ -172,6 +176,31 @@ async function armAlarm() {
   if (cleared) console.log(PREFIX, "Previous poll alarm cleared.");
 
   chrome.alarms.create(POLL_ALARM, { periodInMinutes: POLL_INTERVAL_MIN });
+}
+
+async function reloadNestTab() {
+  // Find any open tab pointing at home.nest.com and reload it.  When the page
+  // finishes loading the interceptor will fire, capture fresh credentials, and
+  // call armAlarm() again — resuming polling without any user interaction.
+  //
+  // If no Nest tab is open we log a warning and do nothing; the next time the
+  // user opens home.nest.com manually the interceptor will supply credentials.
+  const tabs = await chrome.tabs.query({ url: "https://home.nest.com/*" });
+
+  if (tabs.length === 0) {
+    console.warn(PREFIX,
+      "No home.nest.com tab found to reload.",
+      "Polling will resume automatically the next time you open home.nest.com.");
+    return;
+  }
+
+  // If multiple tabs are open, reload only the most recently active one.
+  const target = tabs.reduce((best, t) =>
+    (t.lastAccessed ?? 0) > (best.lastAccessed ?? 0) ? t : best
+  );
+
+  console.log(PREFIX, `Reloading Nest tab (id ${target.id}, url: ${target.url}).`);
+  chrome.tabs.reload(target.id);
 }
 
 async function storeReading(reading) {
