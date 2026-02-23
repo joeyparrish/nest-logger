@@ -1,0 +1,131 @@
+/**
+ * interceptor.js — runs in the page's MAIN world.
+ *
+ * Wraps window.fetch so that any call to the Nest app_launch endpoint is
+ * intercepted, the response is parsed for sensor/thermostat readings, and
+ * the result is posted to the isolated content script via window.postMessage.
+ */
+
+(function () {
+  const APP_LAUNCH_RE = /\/api\/0\.1\/user\/[^/]+\/app_launch/;
+
+  const _fetch = window.fetch.bind(window);
+  window.fetch = async function (input, init) {
+    const response = await _fetch(input, init);
+
+    const url = input instanceof Request ? input.url : String(input);
+    if (APP_LAUNCH_RE.test(url)) {
+      response.clone().json().then(parseAndPost).catch(() => {});
+    }
+
+    return response;
+  };
+
+  // Also intercept XMLHttpRequest in case the app uses it.
+  const _open = XMLHttpRequest.prototype.open;
+  const _send = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    this._nestUrl = url;
+    return _open.call(this, method, url, ...rest);
+  };
+
+  XMLHttpRequest.prototype.send = function (...args) {
+    if (this._nestUrl && APP_LAUNCH_RE.test(this._nestUrl)) {
+      this.addEventListener("load", function () {
+        try {
+          parseAndPost(JSON.parse(this.responseText));
+        } catch (_) {}
+      });
+    }
+    return _send.apply(this, args);
+  };
+
+  // -------------------------------------------------------------------------
+
+  function cToF(c) {
+    return c == null ? null : Math.round(c * 9 / 5 * 10 + 320) / 10;
+  }
+
+  function parseAndPost(data) {
+    const buckets = {};
+    for (const b of data.updated_buckets || []) {
+      buckets[b.object_key] = b.value;
+    }
+
+    // Room names
+    const wheres = {};
+    for (const [key, val] of Object.entries(buckets)) {
+      if (key.startsWith("where.")) {
+        for (const w of val.wheres || []) {
+          wheres[w.where_id] = w.name;
+        }
+      }
+    }
+
+    // rcs_settings: which sensors are active on each thermostat
+    const rcsMap = {};
+    for (const [key, val] of Object.entries(buckets)) {
+      if (key.startsWith("rcs_settings.")) {
+        rcsMap[key.slice("rcs_settings.".length)] = val;
+      }
+    }
+
+    // Temperature sensors (kryptonite buckets)
+    const sensors = [];
+    for (const [key, val] of Object.entries(buckets)) {
+      if (!key.startsWith("kryptonite.")) continue;
+      const serial = key.slice("kryptonite.".length);
+      let thermostatSerial = null;
+      let isActive = false;
+      for (const [ts, rcs] of Object.entries(rcsMap)) {
+        if ((rcs.associated_rcs_sensors || []).includes(key)) {
+          thermostatSerial = ts;
+          isActive = (rcs.active_rcs_sensors || []).includes(key);
+          break;
+        }
+      }
+      sensors.push({
+        serial,
+        room: wheres[val.where_id] || "Unknown",
+        temperature_c: val.current_temperature ?? null,
+        temperature_f: cToF(val.current_temperature),
+        battery_level: val.battery_level ?? null,
+        thermostat_serial: thermostatSerial,
+        is_active: isActive,
+      });
+    }
+
+    // Thermostats (shared buckets)
+    const thermostats = [];
+    for (const [key, val] of Object.entries(buckets)) {
+      if (!key.startsWith("shared.")) continue;
+      const serial = key.slice("shared.".length);
+      const deviceVal = buckets[`device.${serial}`] || {};
+      const hvacAction = val.hvac_heater_state ? "heating"
+                        : val.hvac_ac_state    ? "cooling"
+                        : val.hvac_fan_state   ? "fan"
+                        :                        "idle";
+      thermostats.push({
+        serial,
+        room: wheres[deviceVal.where_id] || "Thermostat",
+        current_temperature_c: val.current_temperature ?? null,
+        current_temperature_f: cToF(val.current_temperature),
+        target_temperature_c: val.target_temperature ?? null,
+        target_temperature_f: cToF(val.target_temperature),
+        hvac_mode: val.target_temperature_type || "off",
+        hvac_action: hvacAction,
+        humidity: val.current_humidity ?? null,
+      });
+    }
+
+    if (sensors.length === 0 && thermostats.length === 0) return;
+
+    window.postMessage({
+      __nestLogger: true,
+      timestamp: new Date().toISOString(),
+      sensors,
+      thermostats,
+    }, "*");
+  }
+})();
