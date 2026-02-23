@@ -4,7 +4,10 @@
   "version": "2.0",
   "description": "Scrapes Nest thermostat sensor data from the web UI and logs it to the console.",
 
-  "host_permissions": ["https://home.nest.com/*"],
+  "host_permissions": [
+    "https://home.nest.com/*",
+    "http://10.0.0.2/*"
+  ],
 
   "content_scripts": [
     {
@@ -12,5 +15,9 @@
       "js": ["scraper.js"],
       "run_at": "document_idle"
     }
-  ]
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  }
 }

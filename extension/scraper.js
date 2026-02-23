@@ -186,12 +186,26 @@
       return;
     }
 
-    const sections   = Object.keys(data);
+    const sections    = Object.keys(data);
     const totalValues = sections.reduce((n, s) => n + Object.keys(data[s]).length, 0);
     console.log(PREFIX,
       `Reading complete: ${sections.length} section(s), ${totalValues} total value(s).`
     );
     console.log(PREFIX, "Reading:", JSON.stringify(data, null, 2));
+
+    // Forward to the background service worker, which will send it to the
+    // remote server.  The service worker is not bound by the page's CSP, so
+    // it can reach http://10.0.0.2/ (or any other origin in host_permissions)
+    // even though a fetch from this content script would be blocked.
+    chrome.runtime.sendMessage({ type: "NEST_READING", timestamp: ts, data },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(PREFIX, "sendMessage failed:", chrome.runtime.lastError.message);
+        } else {
+          console.log(PREFIX, "Background acknowledged reading:", response);
+        }
+      }
+    );
   }
 
   // ── Entry point ────────────────────────────────────────────────────────────
