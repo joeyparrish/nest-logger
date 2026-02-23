@@ -1,32 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Nest Data Logger",
-  "version": "1.0",
-  "description": "Intercepts Nest API responses and logs sensor temperature history.",
+  "version": "2.0",
+  "description": "Scrapes Nest thermostat sensor data from the web UI and logs it to the console.",
 
-  "permissions": ["storage", "unlimitedStorage", "alarms", "tabs"],
   "host_permissions": ["https://home.nest.com/*"],
 
   "content_scripts": [
     {
       "matches": ["https://home.nest.com/*"],
-      "js": ["interceptor.js"],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
-    {
-      "matches": ["https://home.nest.com/*"],
-      "js": ["relay.js"],
-      "run_at": "document_start"
+      "js": ["scraper.js"],
+      "run_at": "document_idle"
     }
-  ],
-
-  "background": {
-    "service_worker": "background.js"
-  },
-
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "Nest Data Logger"
-  }
+  ]
 }
