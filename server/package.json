@@ -1,5 +1,6 @@
 {
   "name": "nest-logger-server",
+  "private": true,
   "version": "1.0.0",
   "description": "Nest sensor data logger and visualization server",
   "main": "server.js",

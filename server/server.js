@@ -2,7 +2,7 @@ const express = require('express');
 const path    = require('path');
 
 const app  = express();
-const PORT = 3000;
+const PORT = 51920;  // E = 5, S = 19, T = 20
 
 app.use(express.static(path.join(__dirname, 'public')));
 
