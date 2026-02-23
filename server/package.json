@@ -5,6 +5,7 @@
   "description": "Nest sensor data logger and visualization server",
   "main": "server.js",
   "scripts": {
+    "seed": "node seed.js",
     "start": "node server.js"
   },
   "dependencies": {
