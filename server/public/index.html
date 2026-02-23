@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nest Temperature History</title>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f0f2f5;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #222;
+      margin-bottom: 12px;
+    }
+
+    #chart-wrap {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,.1);
+      padding: 12px;
+    }
+
+    #chart { width: 100%; height: 520px; }
+
+    #status {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <h1>Nest Temperature History</h1>
+  <div id="chart-wrap">
+    <div id="chart"></div>
+  </div>
+  <div id="status">Loading…</div>
+
+  <script>
+    const chartEl  = document.getElementById('chart');
+    const statusEl = document.getElementById('status');
+
+    // ── HVAC shading ──────────────────────────────────────────────────────────
+    //
+    // Converts the flat hvac_actions array into Plotly layout.shapes —
+    // one semi-transparent rectangle per consecutive run of the same state.
+    // 'idle' runs produce no shape.  Shapes use yref:'paper' so they always
+    // span the full height of the chart regardless of y-axis zoom.
+
+    function buildHvacShapes(timestamps, hvac_actions) {
+      const COLOR = {
+        heat: 'rgba(220, 80,  60,  0.10)',
+        cool: 'rgba( 60, 120, 220, 0.10)',
+      };
+
+      const shapes = [];
+      let i = 0;
+
+      while (i < hvac_actions.length) {
+        const action = hvac_actions[i];
+
+        if (!(action in COLOR)) { i++; continue; }  // skip 'idle'
+
+        // Walk forward while the action stays the same.
+        let j = i + 1;
+        while (j < hvac_actions.length && hvac_actions[j] === action) j++;
+
+        // Extend x1 one interval past the last matching point so there's no
+        // gap between adjacent heating/cooling runs.
+        const x1 = timestamps[j] ?? timestamps[j - 1];
+
+        shapes.push({
+          type:      'rect',
+          xref:      'x',
+          yref:      'paper',   // full chart height
+          x0:        timestamps[i],
+          x1,
+          y0:        0,
+          y1:        1,
+          fillcolor: COLOR[action],
+          line:      { width: 0 },
+          layer:     'below',
+        });
+
+        i = j;
+      }
+
+      return shapes;
+    }
+
+    // ── Main load ─────────────────────────────────────────────────────────────
+
+    async function load() {
+      statusEl.textContent = 'Fetching data…';
+
+      let payload;
+      try {
+        const resp = await fetch('/api/readings');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        payload = await resp.json();
+      } catch (err) {
+        statusEl.textContent = 'Error loading data: ' + err.message;
+        return;
+      }
+
+      const { sensors, timestamps, readings, hvac_actions } = payload;
+
+      // One scattergl (WebGL) trace per sensor for smooth rendering even with
+      // year-scale datasets.
+      const traces = sensors.map(name => ({
+        type: 'scattergl',
+        mode: 'lines',
+        name,
+        x: timestamps,
+        y: readings[name],
+        line: { width: 1.5 },
+      }));
+
+      const shapes = buildHvacShapes(timestamps, hvac_actions);
+
+      const layout = {
+        shapes,
+
+        xaxis: {
+          type: 'date',
+          title: { text: 'Time', standoff: 8 },
+          // Compact range selector buttons for quick navigation.
+          rangeselector: {
+            buttons: [
+              { count: 12, label: '12h', step: 'hour',  stepmode: 'backward' },
+              { count:  1, label:  '1d', step: 'day',   stepmode: 'backward' },
+              { count:  7, label:  '1w', step: 'day',   stepmode: 'backward' },
+              { count:  1, label:  '1m', step: 'month', stepmode: 'backward' },
+              {                label: 'All', step: 'all' },
+            ],
+          },
+          rangeslider: { visible: true, thickness: 0.05 },
+        },
+
+        yaxis: {
+          title: { text: 'Temperature (°F)', standoff: 8 },
+          fixedrange: false,
+        },
+
+        legend: {
+          orientation: 'h',
+          y: -0.18,
+          x: 0.5,
+          xanchor: 'center',
+        },
+
+        hovermode: 'x unified',
+        margin: { t: 16, r: 16, b: 40, l: 60 },
+        paper_bgcolor: 'white',
+        plot_bgcolor:  'white',
+      };
+
+      const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+      };
+
+      Plotly.newPlot(chartEl, traces, layout, config);
+
+      const heatCount = hvac_actions.filter(a => a === 'heat').length;
+      const heatPct   = Math.round(heatCount / hvac_actions.length * 100);
+      statusEl.textContent =
+        `${timestamps.length} readings · ` +
+        `${new Date(timestamps[0]).toLocaleString()} – ` +
+        `${new Date(timestamps.at(-1)).toLocaleString()} · ` +
+        `heating ${heatPct}% of the time`;
+    }
+
+    load();
+  </script>
+</body>
+</html>
