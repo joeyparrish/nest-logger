@@ -2,16 +2,15 @@
  * background.js — Chrome extension service worker.
  *
  * Receives scraped Nest readings from scraper.js via chrome.runtime.sendMessage
- * and forwards them to the remote server.  Running here (rather than in the
+ * and forwards them to the local server.  Running here (rather than in the
  * content script) bypasses the Nest page's Content-Security-Policy, which
  * would block fetch calls to non-Nest origins.
  *
- * The remote server origin must be listed in host_permissions in manifest.json.
+ * The server origin must be listed in host_permissions in manifest.json.
  */
 
-const PREFIX = "[Nest Scraper / background]";
-
-const INGEST_URL = "http://10.0.0.2/";
+const PREFIX     = "[Nest Scraper / background]";
+const INGEST_URL = "http://127.0.0.1:51920/api/readings";
 
 console.log(PREFIX, "Service worker started.");
 
@@ -22,8 +21,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   const { timestamp, data } = message;
 
-  // Log every received data point so you can verify the scraper → background
-  // pipeline is working before wiring up a real ingest endpoint.
+  // Log every received data point for verification.
   console.log(PREFIX, `Received reading at ${timestamp}:`);
   for (const [section, sensors] of Object.entries(data)) {
     console.log(PREFIX, ` [${section}]`);
@@ -32,14 +30,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   }
 
-  // Dummy request — replace with the real ingest call once the server is ready.
-  console.log(PREFIX, `Sending dummy GET to ${INGEST_URL}...`);
-  fetch(INGEST_URL)
+  // POST to the ingest endpoint.
+  fetch(INGEST_URL, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ timestamp, data }),
+  })
     .then((resp) => {
-      console.log(PREFIX, `Dummy GET succeeded — HTTP ${resp.status}`);
+      if (resp.ok) {
+        console.log(PREFIX, `Posted reading to server — HTTP ${resp.status}`);
+      } else {
+        console.warn(PREFIX, `Server rejected reading — HTTP ${resp.status}`);
+      }
     })
     .catch((err) => {
-      console.warn(PREFIX, `Dummy GET failed: ${err.message}`);
+      console.warn(PREFIX, `Failed to post reading: ${err.message}`);
     });
 
   // Acknowledge immediately so the content script callback fires without error.

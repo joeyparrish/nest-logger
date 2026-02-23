@@ -49,7 +49,7 @@ Fetch calls from content scripts are subject to the Nest page's
 The background service worker runs outside the page context and is not
 bound by CSP.  The content script sends readings to the service worker via
 `chrome.runtime.sendMessage`; the service worker POSTs to the local server.
-`http://10.0.0.2/*` must be in `host_permissions` in manifest.json.
+`http://127.0.0.1:51920/*` must be in `host_permissions` in manifest.json.
 
 Note: `host_permissions` for 10.0.0.2 does NOT cause the extension to inject
 into or interact with pages on that host — content script injection is
@@ -138,9 +138,6 @@ Scraped data shape:
 
 ## Pending Work
 
-- [ ] Add `POST /api/readings` ingest endpoint to server.js
-- [ ] Update background.js to POST real scraped readings to the server
-      instead of the current dummy GET to http://10.0.0.2/
 - [ ] Decide on HVAC state source: scrape from DOM or derive from thermostat
       temperature thresholds in the server
 - [ ] Consider downsampling for the `/api/readings` query as the dataset grows

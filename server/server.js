@@ -5,7 +5,36 @@ const db      = require('./db');
 const app  = express();
 const PORT = 51920;  // E = 5, S = 19, T = 20
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ── Ingest ────────────────────────────────────────────────────────────────────
+
+const insertReading = db.prepare(`
+  INSERT OR IGNORE INTO sensor_readings (timestamp, section, sensor, value)
+  VALUES (?, ?, ?, ?)
+`);
+
+app.post('/api/readings', (req, res) => {
+  const { timestamp, data } = req.body;
+
+  if (!timestamp || typeof data !== 'object') {
+    return res.status(400).json({ error: 'Body must include timestamp and data.' });
+  }
+
+  let count = 0;
+  db.transaction(() => {
+    for (const [section, sensors] of Object.entries(data)) {
+      for (const [sensor, value] of Object.entries(sensors)) {
+        insertReading.run(timestamp, section, sensor, value);
+        count++;
+      }
+    }
+  })();
+
+  console.log(`[POST /api/readings] ${timestamp} — inserted ${count} value(s).`);
+  res.json({ ok: true, inserted: count });
+});
 
 // ── Query ─────────────────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@
 
   "host_permissions": [
     "https://home.nest.com/*",
-    "http://10.0.0.2/*"
+    "http://127.0.0.1:51920/*"
   ],
 
   "content_scripts": [
