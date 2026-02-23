@@ -1,31 +1,71 @@
 /**
- * interceptor.js — runs in the page's MAIN world.
+ * interceptor.js — executed in the page's MAIN world.
  *
- * Wraps window.fetch and XMLHttpRequest so that the first app_launch call is
- * intercepted.  Both the parsed reading AND the auth credentials (Authorization
- * header + user-id) are posted to the isolated content script so the background
- * worker can poll on its own schedule.
+ * "MAIN world" means this script runs in the same JavaScript context as the
+ * Nest web app itself, so it can wrap the global fetch/XHR functions before
+ * the app uses them.  It does NOT have access to chrome.* APIs — those are
+ * only available in the "isolated world" (relay.js).
+ *
+ * Flow:
+ *   1. Wrap window.fetch (and XMLHttpRequest as a fallback).
+ *   2. When a call to the app_launch endpoint is detected, clone the response
+ *      so we can read the body without consuming it for the app.
+ *   3. Also read the Authorization and X-nl-user-id request headers — the
+ *      background worker needs these to make its own periodic poll calls.
+ *   4. Parse the bucket data out of the response JSON.
+ *   5. Post everything to relay.js via window.postMessage.
  */
 
 (function () {
+  const PREFIX = "[Nest Logger / interceptor]";
+
+  // Regex that matches the app_launch REST endpoint.
+  // URL shape: /api/0.1/user/<userid>/app_launch
   const APP_LAUNCH_RE = /\/api\/0\.1\/user\/[^/]+\/app_launch/;
 
-  // ---------- fetch wrapper ----------
+  console.log(PREFIX, "Installed. Wrapping window.fetch and XMLHttpRequest.");
+
+  // ── fetch wrapper ───────────────────────────────────────────────────────────
 
   const _fetch = window.fetch.bind(window);
+
   window.fetch = async function (input, init) {
+    // Always perform the real fetch first so the app is never blocked.
     const response = await _fetch(input, init);
 
     const url = input instanceof Request ? input.url : String(input);
+
     if (APP_LAUNCH_RE.test(url)) {
-      const creds = extractCreds(url, input, init);
-      response.clone().json().then((data) => parseAndPost(data, creds)).catch(() => {});
+      console.log(PREFIX, "Detected app_launch fetch →", url);
+
+      // Extract the auth credentials from the request before the response is
+      // consumed.  These are needed by the background worker for polling.
+      const creds = extractCredsFromFetch(url, input, init);
+      if (creds.authorization) {
+        console.log(PREFIX, "Captured Authorization header (length:",
+          creds.authorization.length, "), userId:", creds.userId);
+      } else {
+        console.warn(PREFIX, "Authorization header NOT found on app_launch request.",
+          "Background polling will not be set up until a request with headers is seen.");
+      }
+
+      // Clone the response — reading the body of the original would break the app.
+      response.clone().json()
+        .then((data) => {
+          console.log(PREFIX, "Parsing app_launch response body...");
+          parseAndPost(data, creds);
+        })
+        .catch((err) => {
+          console.error(PREFIX, "Failed to parse app_launch response as JSON:", err);
+        });
     }
 
     return response;
   };
 
-  // ---------- XHR wrapper ----------
+  // ── XMLHttpRequest wrapper ──────────────────────────────────────────────────
+  // Some versions of the Nest web app (or embedded frames) may use XHR instead
+  // of fetch.  We patch it as a fallback.
 
   const _open = XMLHttpRequest.prototype.open;
   const _setRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
@@ -33,67 +73,86 @@
 
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
     this._nestUrl = String(url);
-    this._nestHeaders = {};
+    this._nestHeaders = {};  // collect headers as they are set
     return _open.call(this, method, url, ...rest);
   };
 
   XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
-    if (this._nestHeaders) this._nestHeaders[name.toLowerCase()] = value;
+    // Store every header in lowercase for case-insensitive lookup later.
+    if (this._nestHeaders) {
+      this._nestHeaders[name.toLowerCase()] = value;
+    }
     return _setRequestHeader.call(this, name, value);
   };
 
   XMLHttpRequest.prototype.send = function (...args) {
     if (this._nestUrl && APP_LAUNCH_RE.test(this._nestUrl)) {
-      const url = this._nestUrl;
-      const headers = this._nestHeaders || {};
+      console.log(PREFIX, "Detected app_launch XHR →", this._nestUrl);
+      const capturedUrl = this._nestUrl;
+      const capturedHeaders = Object.assign({}, this._nestHeaders);
+
       this.addEventListener("load", function () {
         try {
           const creds = {
-            url,
-            authorization: headers["authorization"] || null,
-            userId: headers["x-nl-user-id"] || null,
+            url: capturedUrl,
+            authorization: capturedHeaders["authorization"] || null,
+            userId: capturedHeaders["x-nl-user-id"] || null,
           };
+          console.log(PREFIX, "XHR app_launch complete (status:", this.status, ")");
           parseAndPost(JSON.parse(this.responseText), creds);
-        } catch (_) {}
+        } catch (err) {
+          console.error(PREFIX, "Failed to parse XHR app_launch response:", err);
+        }
       });
     }
     return _send.apply(this, args);
   };
 
-  // ---------- helpers ----------
+  // ── Credential extraction ───────────────────────────────────────────────────
 
-  function extractCreds(url, input, init) {
+  function extractCredsFromFetch(url, input, init) {
     let authorization = null;
     let userId = null;
 
-    const getHeader = (headers, name) => {
+    // Helper that reads a header from a Headers object or a plain object.
+    function getHeader(headers, name) {
       if (!headers) return null;
       if (headers instanceof Headers) return headers.get(name);
-      return headers[name] || headers[name.toLowerCase()] || null;
-    };
+      // Plain object — try exact case and lowercase.
+      return headers[name] ?? headers[name.toLowerCase()] ?? null;
+    }
 
     if (input instanceof Request) {
+      // fetch(new Request(url, {headers: ...}))
       authorization = getHeader(input.headers, "Authorization");
-      userId = getHeader(input.headers, "X-nl-user-id");
+      userId        = getHeader(input.headers, "X-nl-user-id");
     } else if (init?.headers) {
+      // fetch(urlString, {headers: {...}})
       authorization = getHeader(init.headers, "Authorization");
-      userId = getHeader(init.headers, "X-nl-user-id");
+      userId        = getHeader(init.headers, "X-nl-user-id");
     }
 
     return { url, authorization, userId };
   }
+
+  // ── Nest data parser ────────────────────────────────────────────────────────
 
   function cToF(c) {
     return c == null ? null : Math.round(c * 9 / 5 * 10 + 320) / 10;
   }
 
   function parseAndPost(data, creds) {
+    // The app_launch response contains an array of "buckets", each a key/value
+    // pair describing one piece of Nest device state.
     const buckets = {};
     for (const b of data.updated_buckets || []) {
       buckets[b.object_key] = b.value;
     }
+    console.log(PREFIX, `Response has ${Object.keys(buckets).length} buckets:`,
+      Object.keys(buckets).join(", "));
 
-    // Room names
+    // ── Room name lookup (where.* buckets) ────────────────────────────────
+    // Each structure has a "where" bucket listing room names keyed by where_id.
     const wheres = {};
     for (const [key, val] of Object.entries(buckets)) {
       if (key.startsWith("where.")) {
@@ -102,8 +161,12 @@
         }
       }
     }
+    console.log(PREFIX, "Room map:", wheres);
 
-    // rcs_settings
+    // ── Active sensor mapping (rcs_settings.* buckets) ────────────────────
+    // rcs_settings links temperature sensors to the thermostat they serve and
+    // records which one is currently "active" (being used for temperature
+    // control).
     const rcsMap = {};
     for (const [key, val] of Object.entries(buckets)) {
       if (key.startsWith("rcs_settings.")) {
@@ -111,7 +174,9 @@
       }
     }
 
-    // Temperature sensors
+    // ── Temperature sensors (kryptonite.* buckets) ────────────────────────
+    // "Kryptonite" is Nest's internal codename for the remote temperature
+    // sensor hardware.
     const sensors = [];
     for (const [key, val] of Object.entries(buckets)) {
       if (!key.startsWith("kryptonite.")) continue;
@@ -135,8 +200,12 @@
         is_active: isActive,
       });
     }
+    console.log(PREFIX, `Parsed ${sensors.length} temperature sensor(s):`,
+      sensors.map(s => `${s.room} ${s.temperature_f}°F${s.is_active ? " [active]" : ""}`));
 
-    // Thermostats
+    // ── Thermostats (shared.* buckets) ────────────────────────────────────
+    // The "shared" bucket holds the live thermostat state: current and target
+    // temperatures, HVAC mode, and whether heating/cooling is running.
     const thermostats = [];
     for (const [key, val] of Object.entries(buckets)) {
       if (!key.startsWith("shared.")) continue;
@@ -158,15 +227,26 @@
         humidity: val.current_humidity ?? null,
       });
     }
+    console.log(PREFIX, `Parsed ${thermostats.length} thermostat(s):`,
+      thermostats.map(t => `${t.room} ${t.current_temperature_f}°F → ${t.target_temperature_f}°F [${t.hvac_action}]`));
 
-    if (sensors.length === 0 && thermostats.length === 0) return;
+    if (sensors.length === 0 && thermostats.length === 0) {
+      console.warn(PREFIX, "No sensors or thermostats found in response. " +
+        "The bucket structure may have changed, or the response was empty.");
+      return;
+    }
 
-    window.postMessage({
+    // Hand off to relay.js via postMessage.  relay.js listens in the isolated
+    // world and forwards to the background service worker.
+    const message = {
       __nestLogger: true,
       timestamp: new Date().toISOString(),
       sensors,
       thermostats,
-      creds,  // authorization header + userId for background polling
-    }, "*");
+      creds,
+    };
+    console.log(PREFIX, "Posting reading to relay.js via window.postMessage.");
+    window.postMessage(message, "*");
   }
+
 })();
