@@ -27,8 +27,8 @@ const RETENTION_MS        = RETENTION_DAYS * 24 * 60 * 60 * 1000;
 // All bucket types the app_launch endpoint can return.  We request all of them
 // so the parser has the full picture (room names, sensor-thermostat links, etc.)
 const BUCKET_TYPES = [
-  "buckets", "device", "kryptonite", "link", "rcs_settings",
-  "schedule", "shared", "structure", "track", "where",
+  "buckets", "delayed_topaz", "device", "kryptonite", "link", "rcs_settings",
+  "schedule", "shared", "structure", "topaz", "track", "where",
 ];
 
 console.log(PREFIX, "Service worker started.");
