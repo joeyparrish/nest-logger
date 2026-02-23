@@ -16,5 +16,6 @@ window.addEventListener("message", (event) => {
       sensors: event.data.sensors,
       thermostats: event.data.thermostats,
     },
+    creds: event.data.creds,  // forwarded so background can set up polling
   });
 });

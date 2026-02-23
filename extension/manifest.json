@@ -4,7 +4,7 @@
   "version": "1.0",
   "description": "Intercepts Nest API responses and logs sensor temperature history.",
 
-  "permissions": ["storage", "unlimitedStorage"],
+  "permissions": ["storage", "unlimitedStorage", "alarms"],
   "host_permissions": ["https://home.nest.com/*"],
 
   "content_scripts": [

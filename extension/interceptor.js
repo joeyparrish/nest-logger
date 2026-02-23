@@ -1,13 +1,16 @@
 /**
  * interceptor.js — runs in the page's MAIN world.
  *
- * Wraps window.fetch so that any call to the Nest app_launch endpoint is
- * intercepted, the response is parsed for sensor/thermostat readings, and
- * the result is posted to the isolated content script via window.postMessage.
+ * Wraps window.fetch and XMLHttpRequest so that the first app_launch call is
+ * intercepted.  Both the parsed reading AND the auth credentials (Authorization
+ * header + user-id) are posted to the isolated content script so the background
+ * worker can poll on its own schedule.
  */
 
 (function () {
   const APP_LAUNCH_RE = /\/api\/0\.1\/user\/[^/]+\/app_launch/;
+
+  // ---------- fetch wrapper ----------
 
   const _fetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
@@ -15,39 +18,76 @@
 
     const url = input instanceof Request ? input.url : String(input);
     if (APP_LAUNCH_RE.test(url)) {
-      response.clone().json().then(parseAndPost).catch(() => {});
+      const creds = extractCreds(url, input, init);
+      response.clone().json().then((data) => parseAndPost(data, creds)).catch(() => {});
     }
 
     return response;
   };
 
-  // Also intercept XMLHttpRequest in case the app uses it.
+  // ---------- XHR wrapper ----------
+
   const _open = XMLHttpRequest.prototype.open;
+  const _setRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
   const _send = XMLHttpRequest.prototype.send;
 
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-    this._nestUrl = url;
+    this._nestUrl = String(url);
+    this._nestHeaders = {};
     return _open.call(this, method, url, ...rest);
+  };
+
+  XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+    if (this._nestHeaders) this._nestHeaders[name.toLowerCase()] = value;
+    return _setRequestHeader.call(this, name, value);
   };
 
   XMLHttpRequest.prototype.send = function (...args) {
     if (this._nestUrl && APP_LAUNCH_RE.test(this._nestUrl)) {
+      const url = this._nestUrl;
+      const headers = this._nestHeaders || {};
       this.addEventListener("load", function () {
         try {
-          parseAndPost(JSON.parse(this.responseText));
+          const creds = {
+            url,
+            authorization: headers["authorization"] || null,
+            userId: headers["x-nl-user-id"] || null,
+          };
+          parseAndPost(JSON.parse(this.responseText), creds);
         } catch (_) {}
       });
     }
     return _send.apply(this, args);
   };
 
-  // -------------------------------------------------------------------------
+  // ---------- helpers ----------
+
+  function extractCreds(url, input, init) {
+    let authorization = null;
+    let userId = null;
+
+    const getHeader = (headers, name) => {
+      if (!headers) return null;
+      if (headers instanceof Headers) return headers.get(name);
+      return headers[name] || headers[name.toLowerCase()] || null;
+    };
+
+    if (input instanceof Request) {
+      authorization = getHeader(input.headers, "Authorization");
+      userId = getHeader(input.headers, "X-nl-user-id");
+    } else if (init?.headers) {
+      authorization = getHeader(init.headers, "Authorization");
+      userId = getHeader(init.headers, "X-nl-user-id");
+    }
+
+    return { url, authorization, userId };
+  }
 
   function cToF(c) {
     return c == null ? null : Math.round(c * 9 / 5 * 10 + 320) / 10;
   }
 
-  function parseAndPost(data) {
+  function parseAndPost(data, creds) {
     const buckets = {};
     for (const b of data.updated_buckets || []) {
       buckets[b.object_key] = b.value;
@@ -63,7 +103,7 @@
       }
     }
 
-    // rcs_settings: which sensors are active on each thermostat
+    // rcs_settings
     const rcsMap = {};
     for (const [key, val] of Object.entries(buckets)) {
       if (key.startsWith("rcs_settings.")) {
@@ -71,7 +111,7 @@
       }
     }
 
-    // Temperature sensors (kryptonite buckets)
+    // Temperature sensors
     const sensors = [];
     for (const [key, val] of Object.entries(buckets)) {
       if (!key.startsWith("kryptonite.")) continue;
@@ -96,7 +136,7 @@
       });
     }
 
-    // Thermostats (shared buckets)
+    // Thermostats
     const thermostats = [];
     for (const [key, val] of Object.entries(buckets)) {
       if (!key.startsWith("shared.")) continue;
@@ -126,6 +166,7 @@
       timestamp: new Date().toISOString(),
       sensors,
       thermostats,
+      creds,  // authorization header + userId for background polling
     }, "*");
   }
 })();
