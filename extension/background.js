@@ -220,6 +220,7 @@ async function storeReading(reading) {
     `Reading stored. Total: ${trimmed.length} (added 1, dropped ${dropped} old).`,
     `Span: ${trimmed[0]?.timestamp ?? "—"} → ${trimmed[trimmed.length - 1]?.timestamp ?? "—"}`
   );
+  console.log(PREFIX, "Reading data:", JSON.stringify(reading, null, 2));
 }
 
 // ── Nest data parser ──────────────────────────────────────────────────────────
