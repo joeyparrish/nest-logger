@@ -12,8 +12,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 //   - Outside temperature follows a diurnal sinusoid (cold at night, warm at noon)
 //   - Interior rooms are stable with a gentle opposing cycle
 //   - A slow mean-reverting random walk adds realistic drift to each sensor
-//   - HVAC state is derived from the thermostat temperature (heat below 69°F,
-//     idle above — it's February, so cooling never runs)
+//   - HVAC state: heat below 69°F, cool above 73°F, idle in between
+//     The thermostat amplitude is set wide enough to cross both thresholds
+//     within each day so all three states are visible in the chart.
 //
 // Replace this function with a SQLite query once collection is wired up.
 
@@ -32,7 +33,7 @@ function generateDummyData() {
   //        in the evening (people home, cooking) and coolest before dawn.
   //        Outside peaks around solar noon (phase = -π/2).
   const CONFIG = {
-    'Entryway Thermostat': { base: 70.5, amp: 1.5, phase: Math.PI * 0.9 },
+    'Entryway Thermostat': { base: 71.0, amp: 3.5, phase: Math.PI * 0.9 },
     'Master Bedroom':      { base: 66.5, amp: 2.2, phase: Math.PI * 1.1 },
     'Kitchen':             { base: 69.0, amp: 2.5, phase: Math.PI * 0.8 },
     'Basement':            { base: 78.0, amp: 1.0, phase: Math.PI       },
@@ -72,9 +73,9 @@ function generateDummyData() {
       readings[name].push(Math.round(val * 10) / 10);
     }
 
-    // Thermostat model: heat below 69°F, idle above.
+    // Thermostat model: heat below 69°F, cool above 73°F, idle in between.
     const thermoTemp = readings['Entryway Thermostat'].at(-1);
-    hvac_actions.push(thermoTemp < 69 ? 'heat' : 'idle');
+    hvac_actions.push(thermoTemp < 69 ? 'heat' : thermoTemp > 73 ? 'cool' : 'idle');
   }
 
   return { sensors: SENSOR_NAMES, timestamps, readings, hvac_actions };
