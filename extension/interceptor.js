@@ -99,10 +99,13 @@
             ? capturedHeaderNames.join(", ")
             : "(none — auth may be handled by a service worker or cookies, not setRequestHeader)");
 
+          // userId is not sent as a header — extract it from the URL instead.
+          // URL shape: /api/0.1/user/<userId>/app_launch
+          const userIdMatch = capturedUrl.match(/\/user\/([^/]+)\/app_launch/);
           const creds = {
             url: capturedUrl,
             authorization: capturedHeaders["authorization"] || null,
-            userId: capturedHeaders["x-nl-user-id"] || null,
+            userId: userIdMatch?.[1] || capturedHeaders["x-nl-user-id"] || null,
           };
           console.log(PREFIX, "XHR credentials:",
             `authorization=${creds.authorization ? "found" : "NOT FOUND"}`,
@@ -141,7 +144,6 @@
 
     if (input instanceof Request) {
       // fetch(new Request(url, {headers: ...}))
-      // List all header names on the Request to verify what's present.
       const requestHeaderNames = [...input.headers.keys()];
       console.log(PREFIX, `Request header names: [${requestHeaderNames.join(", ")}]`);
       authorization = getHeader(input.headers, "Authorization");
@@ -154,6 +156,13 @@
       console.warn(PREFIX, "No headers found on app_launch fetch at all.",
         "The app may be using a service worker or middleware to inject auth headers,",
         "which are not visible to the MAIN-world fetch wrapper.");
+    }
+
+    // userId may not be in headers — fall back to parsing it from the URL.
+    // URL shape: /api/0.1/user/<userId>/app_launch
+    if (!userId) {
+      const m = url.match(/\/user\/([^/]+)\/app_launch/);
+      if (m) userId = m[1];
     }
 
     console.log(PREFIX,
