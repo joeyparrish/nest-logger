@@ -53,7 +53,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log(PREFIX, "Credentials received. Saving and arming poll alarm.");
     saveCredentials(creds)
       .then(armAlarm)
-      .then(() => console.log(PREFIX, `Poll alarm armed: every ${POLL_INTERVAL_MIN} min.`))
+      .then(() => {
+        console.log(PREFIX, `Poll alarm armed: every ${POLL_INTERVAL_MIN} min.`);
+        // chrome.alarms fires the first tick after periodInMinutes, not immediately.
+        // The intercepted web-app reading never includes shared/device buckets
+        // (the web app doesn't request them), so thermostat data would be absent
+        // for up to 5 minutes.  Trigger one immediate poll right now so the very
+        // next reading is complete.
+        console.log(PREFIX, "Triggering immediate poll for full data (incl. thermostats)...");
+        poll();
+      })
       .catch((err) => console.error(PREFIX, "Failed to arm alarm:", err));
   } else {
     console.warn(PREFIX, "No credentials in message — poll alarm not updated.",

@@ -93,12 +93,21 @@
 
       this.addEventListener("load", function () {
         try {
+          const capturedHeaderNames = Object.keys(capturedHeaders);
+          console.log(PREFIX, "XHR app_launch complete (status:", this.status, ")");
+          console.log(PREFIX, "XHR captured header names:", capturedHeaderNames.length
+            ? capturedHeaderNames.join(", ")
+            : "(none — auth may be handled by a service worker or cookies, not setRequestHeader)");
+
           const creds = {
             url: capturedUrl,
             authorization: capturedHeaders["authorization"] || null,
             userId: capturedHeaders["x-nl-user-id"] || null,
           };
-          console.log(PREFIX, "XHR app_launch complete (status:", this.status, ")");
+          console.log(PREFIX, "XHR credentials:",
+            `authorization=${creds.authorization ? "found" : "NOT FOUND"}`,
+            `userId=${creds.userId ?? "NOT FOUND"}`);
+
           parseAndPost(JSON.parse(this.responseText), creds);
         } catch (err) {
           console.error(PREFIX, "Failed to parse XHR app_launch response:", err);
@@ -122,15 +131,34 @@
       return headers[name] ?? headers[name.toLowerCase()] ?? null;
     }
 
+    // Log the raw shape of the fetch arguments so we can see exactly where
+    // the headers are (or aren't) when app_launch is called.
+    const inputType = input instanceof Request ? "Request object" : `string (${typeof input})`;
+    const initHeaderType = init?.headers
+      ? (init.headers instanceof Headers ? "Headers object" : `plain object, keys: [${Object.keys(init.headers).join(", ")}]`)
+      : "none";
+    console.log(PREFIX, `extractCreds: input=${inputType}, init.headers=${initHeaderType}`);
+
     if (input instanceof Request) {
       // fetch(new Request(url, {headers: ...}))
+      // List all header names on the Request to verify what's present.
+      const requestHeaderNames = [...input.headers.keys()];
+      console.log(PREFIX, `Request header names: [${requestHeaderNames.join(", ")}]`);
       authorization = getHeader(input.headers, "Authorization");
       userId        = getHeader(input.headers, "X-nl-user-id");
     } else if (init?.headers) {
       // fetch(urlString, {headers: {...}})
       authorization = getHeader(init.headers, "Authorization");
       userId        = getHeader(init.headers, "X-nl-user-id");
+    } else {
+      console.warn(PREFIX, "No headers found on app_launch fetch at all.",
+        "The app may be using a service worker or middleware to inject auth headers,",
+        "which are not visible to the MAIN-world fetch wrapper.");
     }
+
+    console.log(PREFIX,
+      `Extracted: authorization=${authorization ? `"${authorization.slice(0, 20)}..."` : "null"}`,
+      `userId=${userId ?? "null"}`);
 
     return { url, authorization, userId };
   }
