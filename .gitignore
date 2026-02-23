@@ -1,3 +1,4 @@
 .claude/
 *.sw*
 server/node_modules/
+server/nest.db*
