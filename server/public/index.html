@@ -67,6 +67,10 @@
     // Tracked so updateStatus stays correct after a background refresh.
     let currentRange = null;
 
+    // Exponential backoff delay for failed refreshes.  Resets to 1s on success,
+    // doubles on each failure, capped at REFRESH_INTERVAL_MS.
+    let failureDelayMs = 1000;
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     function computeRefreshTimeMs() {
@@ -348,11 +352,16 @@
         } else {
           updateStatus(timestamps[0], timestamps.at(-1));
         }
-      } catch {
-        // silently skip failed refreshes; next timeout will retry
-      } finally {
-        // Always schedule the next refresh, even if this one failed.
+
+        // Success — reset backoff and schedule next refresh at the normal time.
+        failureDelayMs = 1000;
         setTimeout(refresh, computeRefreshTimeMs());
+      } catch {
+        // Failure — retry after the current backoff delay, then double it for
+        // next time, up to the full refresh interval.
+        console.warn(`Refresh failed. Retrying in ${(failureDelayMs / 1000).toFixed(1)}s.`);
+        setTimeout(refresh, failureDelayMs);
+        failureDelayMs = Math.min(failureDelayMs * 2, REFRESH_INTERVAL_MS);
       }
     }
 
