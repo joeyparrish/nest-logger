@@ -69,6 +69,18 @@
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    function computeRefreshTimeMs() {
+      // The timeout is calculated by the age of the data, to sync better with
+      // the collection timing.
+      const latestDataAgeMs = Date.now() - toUtcMs(timestamps.at(-1));
+      // 1 second after new data would arrive on the server, assuming ideal
+      // conditions.
+      const refreshTimeMs =
+          REFRESH_INTERVAL_MS + 1000 - latestDataAgeMs;
+      console.log(`Refresh scheduled for ${(refreshTimeMs / 1000).toFixed(1)} seconds.`);
+      return refreshTimeMs;
+    }
+
     // Parse a timestamp to UTC milliseconds.
     // If it's from the database, it was normalized to a Date object.  If
     // it's Plotly's obnoxious local time strings with no TZ info (given in
@@ -310,12 +322,15 @@
         // Ignore unrelated relayout events (e.g. legend clicks, y-axis zoom).
       });
 
-      setInterval(refresh, REFRESH_INTERVAL_MS);
+      // Schedule the first refresh.
+      setTimeout(refresh, computeRefreshTimeMs());
     }
 
     // ── Background refresh ────────────────────────────────────────────────────
 
     async function refresh() {
+      console.log('Refreshing data.');
+
       let data;
       try {
         data = await fetchData();
@@ -337,6 +352,9 @@
       } else {
         updateStatus(timestamps[0], timestamps.at(-1));
       }
+
+      // Schedule the next refresh.
+      setTimeout(refresh, computeRefreshTimeMs());
     }
 
     load();
