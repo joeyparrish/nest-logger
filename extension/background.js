@@ -19,10 +19,10 @@ console.log(PREFIX, "Service worker started.");
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type !== "NEST_READING") return;
 
-  const { timestamp, data } = message;
+  const { timestamp, data, hvac_action } = message;
 
   // Log every received data point for verification.
-  console.log(PREFIX, `Received reading at ${timestamp}:`);
+  console.log(PREFIX, `Received reading at ${timestamp} (hvac: ${hvac_action}):`);
   for (const [section, sensors] of Object.entries(data)) {
     console.log(PREFIX, ` [${section}]`);
     for (const [name, value] of Object.entries(sensors)) {
@@ -34,7 +34,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   fetch(INGEST_URL, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ timestamp, data }),
+    body:    JSON.stringify({ timestamp, data, hvac_action }),
   })
     .then((resp) => {
       if (resp.ok) {

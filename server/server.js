@@ -15,11 +15,16 @@ const insertReading = db.prepare(`
   VALUES (?, ?, ?, ?)
 `);
 
-app.post('/api/readings', (req, res) => {
-  const { timestamp, data } = req.body;
+const insertHvac = db.prepare(`
+  INSERT OR IGNORE INTO hvac_states (timestamp, action)
+  VALUES (?, ?)
+`);
 
-  if (!timestamp || typeof data !== 'object') {
-    return res.status(400).json({ error: 'Body must include timestamp and data.' });
+app.post('/api/readings', (req, res) => {
+  const { timestamp, data, hvac_action } = req.body;
+
+  if (!timestamp || typeof data !== 'object' || !hvac_action) {
+    return res.status(400).json({ error: 'Body must include timestamp, data, and hvac_action.' });
   }
 
   let count = 0;
@@ -30,9 +35,10 @@ app.post('/api/readings', (req, res) => {
         count++;
       }
     }
+    insertHvac.run(timestamp, hvac_action);
   })();
 
-  console.log(`[POST /api/readings] ${timestamp} — inserted ${count} value(s).`);
+  console.log(`[POST /api/readings] ${timestamp} — inserted ${count} value(s), hvac: ${hvac_action}.`);
   res.json({ ok: true, inserted: count });
 });
 

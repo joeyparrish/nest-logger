@@ -83,6 +83,23 @@
     window.location.href = link;
   }
 
+  // ── HVAC state ─────────────────────────────────────────────────────────────
+
+  /**
+   * Read the current HVAC state from the thermostat card element.
+   * Returns 'heat', 'cool', or 'idle'.
+   */
+  function scrapeHvacAction() {
+    const el = document.querySelector('.cards .card.type-thermostat');
+    if (!el) {
+      console.warn(PREFIX, "Thermostat card element not found — defaulting hvac_action to 'idle'.");
+      return 'idle';
+    }
+    if (el.classList.contains('thermostat-heating')) return 'heat';
+    if (el.classList.contains('thermostat-cooling')) return 'cool';
+    return 'idle';
+  }
+
   // ── Scraping ───────────────────────────────────────────────────────────────
 
   /**
@@ -180,7 +197,9 @@
     const ts = new Date().toISOString();
     console.log(PREFIX, `=== Poll at ${ts} ===`);
 
-    const data = await scrape();
+    const data        = await scrape();
+    const hvac_action = scrapeHvacAction();
+
     if (!data) {
       console.warn(PREFIX, "Scrape returned null — no reading this cycle.");
       return;
@@ -189,15 +208,16 @@
     const sections    = Object.keys(data);
     const totalValues = sections.reduce((n, s) => n + Object.keys(data[s]).length, 0);
     console.log(PREFIX,
-      `Reading complete: ${sections.length} section(s), ${totalValues} total value(s).`
+      `Reading complete: ${sections.length} section(s), ${totalValues} total value(s). ` +
+      `HVAC: ${hvac_action}`
     );
     console.log(PREFIX, "Reading:", JSON.stringify(data, null, 2));
 
     // Forward to the background service worker, which will send it to the
-    // remote server.  The service worker is not bound by the page's CSP, so
-    // it can reach http://10.0.0.2/ (or any other origin in host_permissions)
-    // even though a fetch from this content script would be blocked.
-    chrome.runtime.sendMessage({ type: "NEST_READING", timestamp: ts, data },
+    // local server.  The service worker is not bound by the page's CSP, so
+    // it can reach http://127.0.0.1:51920/ even though a fetch from this
+    // content script would be blocked.
+    chrome.runtime.sendMessage({ type: "NEST_READING", timestamp: ts, data, hvac_action },
       (response) => {
         if (chrome.runtime.lastError) {
           console.error(PREFIX, "sendMessage failed:", chrome.runtime.lastError.message);
