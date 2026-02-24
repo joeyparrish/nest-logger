@@ -21,6 +21,8 @@ Express server (local network, http://127.0.0.1:51920)
   db.js               — shared better-sqlite3 connection (WAL mode)
   nest.db             — SQLite database
   public/index.html   — Plotly.js chart frontend
+  start.sh            — wrapper script that loads nvm and starts server.js
+  nest-logger.service — template systemd user service (copy to ~/.config/systemd/user/)
 
 Utilities
   seed.js             — one-shot dummy data seeder for development
@@ -100,6 +102,29 @@ Schema is defined **only in db.js** (`db.exec` runs on first import).
 Any script that imports `db.js` gets a fully initialized database, so there
 is no required startup order between server.js and seed.js.
 
+### Frontend auto-refresh
+
+The chart page refreshes data from the server automatically without a page
+reload, using `Plotly.react` to update traces and HVAC shapes while preserving
+the user's current zoom state.
+
+Refresh timing is computed from the age of the latest data point, targeting
+1 second after the next expected collection cycle — so the browser stays
+roughly in sync with the extension's 5-minute poll without drifting over time.
+
+On fetch failure, exponential backoff is used: 1 s → 2 s → 4 s → … up to
+`REFRESH_INTERVAL_MS` (5 min). Resets to 1 s on the next success.
+
+A "last reading: X min ago" indicator updates every 60 seconds independently
+of the data refresh, so the displayed age stays current between refreshes.
+
+Note: Plotly's `plotly_relayout` event fires with different key shapes
+depending on how the user zooms:
+- Click-drag or range-selector buttons → `ev['xaxis.range[0]']` / `ev['xaxis.range[1]']`
+- Rangeslider handle drag → `ev['xaxis.range']` (array)
+
+Both cases are handled explicitly in the relayout listener.
+
 ### Seed / dummy data
 
 `seed.js` generates 3 days of synthetic 5-minute readings (sinusoidal diurnal
@@ -125,7 +150,7 @@ Chart: http://localhost:51920
 
 ```bash
 cp server/nest-logger.service ~/.config/systemd/user/
-# Edit ExecStart in ~/.config/systemd/user/nest-logger.service to the actual path
+# Edit ExecStart in the copied file to the actual path of start.sh
 loginctl enable-linger $USER          # start user session at boot (once ever)
 systemctl --user daemon-reload
 systemctl --user enable --now nest-logger
