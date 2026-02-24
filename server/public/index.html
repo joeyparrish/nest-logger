@@ -116,7 +116,13 @@
 
       // Derive flat parallel arrays from the row objects.  Because they all
       // come from the same source array, alignment is guaranteed.
-      const timestamps   = rows.map(r => r.timestamp);
+      // CRITICAL: map incoming timestamps (ISO strings in UTC) to Date
+      // objects.  This normalizes rendering in the UI to local time, and
+      // provides consistency between different data sources.  The ranges will
+      // be either local time strings with no TZ (range when zooming; thanks,
+      // Plotly 😠) or full Date objects created from UTC.  There will be no
+      // confusion this way.
+      const timestamps   = rows.map(r => new Date(r.timestamp));
       const hvac_actions = rows.map(r => r.hvac_action);
       const readings     = Object.fromEntries(
         sensors.map(name => [name, rows.map(r => r.sensors[name] ?? null)])
@@ -198,16 +204,11 @@
       // ── Helpers ─────────────────────────────────────────────────────────────
 
       // Parse a timestamp to UTC milliseconds.
-      // DB timestamps already carry a Z suffix and parse correctly.
-      // Plotly relayout range strings use a space separator and no timezone
-      // indicator — they represent UTC wall-clock time but new Date() would
-      // misread them as local time.  Normalise to a proper UTC ISO string first.
-      // Note that until you zoom, the range strings are actually in UTC ISO.
-      // It's very frustrating.
+      // If it's from the database, it was normalized to a Date object.  If
+      // it's Plotly's obnoxious local time strings with no TZ info (given in
+      // the range when we zoom), we interpret as Date first.
       function toUtcMs(s) {
-        if (!s.endsWith('Z') && !s.includes('+')) {
-          s = s.trim().replace(' ', 'T') + 'Z';
-        }
+        if (s instanceof Date) return s.getTime();
         return new Date(s).getTime();
       }
 
