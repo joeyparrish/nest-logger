@@ -39,7 +39,11 @@ function generateDummyData() {
 
   const INTERVAL_MS = 5 * 60 * 1000;           // 5 minutes
   const DURATION_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
-  const now         = Date.now();
+
+  // 1 year before the creation of this tool, to make removal of seed data
+  // easier if someone accidentally runs the seed process after beginning to
+  // collect real data.
+  const END_DATE = 1740422190840;
 
   const timestamps   = [];
   const readings     = {};
@@ -48,7 +52,7 @@ function generateDummyData() {
 
   for (const name of SENSOR_NAMES) readings[name] = [];
 
-  for (let t = now - DURATION_MS; t <= now; t += INTERVAL_MS) {
+  for (let t = END_DATE - DURATION_MS; t <= END_DATE; t += INTERVAL_MS) {
     const dt       = new Date(t);
     const hourFrac = (dt.getUTCHours() * 60 + dt.getUTCMinutes()) / (24 * 60);
 
