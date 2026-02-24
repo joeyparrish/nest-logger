@@ -116,10 +116,28 @@ cd server
 npm install        # first time only
 npm start          # starts server on port 51920
 
-node seed.js       # optional: populate DB with dummy data (run after server at least once)
+node seed.js       # optional: populate DB with dummy data
 ```
 
 Chart: http://localhost:51920
+
+## Running as a systemd User Service (start on boot)
+
+```bash
+cp server/nest-logger.service ~/.config/systemd/user/
+# Edit ExecStart in ~/.config/systemd/user/nest-logger.service to the actual path
+loginctl enable-linger $USER          # start user session at boot (once ever)
+systemctl --user daemon-reload
+systemctl --user enable --now nest-logger
+```
+
+Useful commands:
+
+```bash
+systemctl --user status nest-logger
+journalctl --user -u nest-logger -f   # live logs
+systemctl --user restart nest-logger
+```
 
 ---
 
