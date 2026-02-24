@@ -39,8 +39,7 @@ app.post('/api/readings', (req, res) => {
 // ── Query ─────────────────────────────────────────────────────────────────────
 
 function queryReadings() {
-  // Sensors, in the order their names first appear by timestamp so the chart
-  // legend is stable across page loads.
+  // Sensor names in stable first-seen order.
   const sensors = db.prepare(`
     SELECT sensor
     FROM sensor_readings
@@ -49,37 +48,51 @@ function queryReadings() {
     ORDER BY MIN(timestamp), sensor
   `).pluck().all();
 
-  // All distinct timestamps in chronological order.
-  const timestamps = db.prepare(`
-    SELECT DISTINCT timestamp FROM sensor_readings ORDER BY timestamp
-  `).pluck().all();
-
-  // All temperature readings in one query, then pivot in JS.
-  const rows = db.prepare(`
+  // All temperature readings in one pass.
+  const dbRows = db.prepare(`
     SELECT timestamp, sensor, value
     FROM sensor_readings
     WHERE section = 'TEMPERATURE SENSORS'
     ORDER BY timestamp
   `).all();
 
-  // Build a per-timestamp lookup for fast pivoting.
-  const byTs = new Map(timestamps.map(ts => [ts, {}]));
-  for (const row of rows) byTs.get(row.timestamp)[row.sensor] = row.value;
+  // HVAC states keyed by timestamp for O(1) lookup.
+  const hvacByTs = new Map(
+    db.prepare('SELECT timestamp, action FROM hvac_states').all()
+      .map(r => [r.timestamp, r.action])
+  );
 
-  // Produce the columnar format the frontend expects.
-  const readings = {};
-  for (const s of sensors) {
-    readings[s] = timestamps.map(ts => byTs.get(ts)?.[s] ?? null);
+  // Build one snapshot object per timestamp.  Each snapshot embeds its own
+  // hvac_action so there is no separate parallel array that could fall out of
+  // alignment with the timestamp list.
+  const snapshotMap = new Map();
+  for (const { timestamp, sensor, value } of dbRows) {
+    if (!snapshotMap.has(timestamp)) {
+      snapshotMap.set(timestamp, {
+        timestamp,
+        sensors:     {},
+        hvac_action: hvacByTs.get(timestamp) ?? 'idle',
+      });
+    }
+    snapshotMap.get(timestamp).sensors[sensor] = value;
   }
 
-  // HVAC states aligned to the same timestamp array.
-  const hvacRows  = db.prepare(
-    'SELECT timestamp, action FROM hvac_states ORDER BY timestamp'
-  ).all();
-  const hvacByTs  = new Map(hvacRows.map(r => [r.timestamp, r.action]));
-  const hvac_actions = timestamps.map(ts => hvacByTs.get(ts) ?? 'idle');
+  // Sort snapshots chronologically, then carry the last known HVAC state
+  // forward into any gap.  Only falls back to 'idle' if no prior state exists
+  // (i.e. the very first reading has no hvac_states entry).
+  const rows = [...snapshotMap.values()]
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
-  return { sensors, timestamps, readings, hvac_actions };
+  let lastKnownAction = 'idle';
+  for (const row of rows) {
+    if (hvacByTs.has(row.timestamp)) {
+      lastKnownAction = row.hvac_action;
+    } else {
+      row.hvac_action = lastKnownAction;
+    }
+  }
+
+  return { sensors, rows };
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -87,7 +100,7 @@ function queryReadings() {
 app.get('/api/readings', (req, res) => {
   const data = queryReadings();
   console.log(
-    `[/api/readings] ${data.timestamps.length} timestamps, ` +
+    `[/api/readings] ${data.rows.length} snapshots, ` +
     `${data.sensors.length} sensors: [${data.sensors.join(', ')}]`
   );
   res.json(data);

@@ -112,7 +112,15 @@
         return;
       }
 
-      const { sensors, timestamps, readings, hvac_actions } = payload;
+      const { sensors, rows } = payload;
+
+      // Derive flat parallel arrays from the row objects.  Because they all
+      // come from the same source array, alignment is guaranteed.
+      const timestamps   = rows.map(r => r.timestamp);
+      const hvac_actions = rows.map(r => r.hvac_action);
+      const readings     = Object.fromEntries(
+        sensors.map(name => [name, rows.map(r => r.sensors[name] ?? null)])
+      );
 
       // One scattergl (WebGL) trace per sensor for smooth rendering even with
       // year-scale datasets.
