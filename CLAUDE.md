@@ -16,7 +16,7 @@ Chrome extension (home.nest.com tab)
   scraper.js          — content script, scrapes the DOM every 5 min
   background.js       — service worker, receives readings and POSTs to server
 
-Express server (local network, http://10.0.0.2:51920)
+Express server (local network, http://127.0.0.1:51920)
   server.js           — serves the chart page and /api/readings endpoint
   db.js               — shared better-sqlite3 connection (WAL mode)
   nest.db             — SQLite database
@@ -51,7 +51,7 @@ bound by CSP.  The content script sends readings to the service worker via
 `chrome.runtime.sendMessage`; the service worker POSTs to the local server.
 `http://127.0.0.1:51920/*` must be in `host_permissions` in manifest.json.
 
-Note: `host_permissions` for 10.0.0.2 does NOT cause the extension to inject
+Note: `host_permissions` for 127.0.0.1 does NOT cause the extension to inject
 into or interact with pages on that host — content script injection is
 controlled solely by `content_scripts[].matches`.
 
@@ -62,6 +62,20 @@ Chosen over Grafana+InfluxDB because the HVAC background shading requirement
 maps directly to Plotly's `layout.shapes` API.  Grafana's time-series panel
 only supports horizontal threshold bands, not arbitrary time-range fills.
 `scattergl` (WebGL) traces handle year-scale datasets without performance issues.
+
+### Timestamp handling
+
+DB timestamps are UTC ISO strings (e.g. `"2026-02-23T18:00:00.000Z"`).  On
+the client, they are immediately converted to `Date` objects so Plotly renders
+them in the user's local timezone.
+
+`toUtcMs(s)` handles two cases:
+- `Date` object (from the DB mapping) → `.getTime()`
+- string (from Plotly's zoom/pan `relayout` event) → `new Date(s).getTime()`
+
+Plotly emits range strings as local wall-clock time with no timezone suffix
+(e.g. `"2026-02-20 15:58:09"`), which `new Date()` correctly interprets as
+local time — matching the `Date` objects already in the `timestamps` array.
 
 ### better-sqlite3
 
@@ -113,7 +127,7 @@ Chart: http://localhost:51920
 
 ```
 extension/
-  manifest.json     — MV3, host_permissions: home.nest.com + 10.0.0.2
+  manifest.json     — MV3, host_permissions: home.nest.com + 127.0.0.1:51920
   scraper.js        — content script (document_idle), scrapes carousel DOM
   background.js     — service worker, receives NEST_READING messages, POSTs to server
 ```
@@ -124,13 +138,22 @@ The scraper navigates to a `/thermostat/DEVICE_*` URL if not already there,
 then waits for `[data-test="thermozilla-aag-carousel-container"]` to appear,
 scrapes section headers and sensor rows, and polls every 5 minutes.
 
-Scraped data shape:
+HVAC state is read from `.cards .card.type-thermostat` — the presence of
+`thermostat-heating` or `thermostat-cooling` in the class list determines the
+state; otherwise it defaults to `'idle'`.
+
+Message payload sent to background service worker:
 
 ```json
 {
-  "TEMPERATURE SENSORS": { "Basement": 80, "Kitchen": 69 },
-  "INSIDE HUMIDITY":     { "Entryway": 40 },
-  "OUTSIDE TEMP.":       { "Doreen": 47 }
+  "type": "NEST_READING",
+  "timestamp": "2026-02-23T18:00:00.000Z",
+  "hvac_action": "heat",
+  "data": {
+    "TEMPERATURE SENSORS": { "Basement": 80, "Kitchen": 69 },
+    "INSIDE HUMIDITY":     { "Entryway": 40 },
+    "OUTSIDE TEMP.":       { "Doreen": 47 }
+  }
 }
 ```
 
@@ -138,7 +161,5 @@ Scraped data shape:
 
 ## Pending Work
 
-- [ ] Decide on HVAC state source: scrape from DOM or derive from thermostat
-      temperature thresholds in the server
 - [ ] Consider downsampling for the `/api/readings` query as the dataset grows
       (e.g. return one reading per 30 min when the time range exceeds 2 weeks)
