@@ -76,7 +76,7 @@
       // 1 second after new data would arrive on the server, assuming ideal
       // conditions.
       const refreshTimeMs =
-          REFRESH_INTERVAL_MS + 1000 - latestDataAgeMs;
+          Math.max(0, REFRESH_INTERVAL_MS + 1000 - latestDataAgeMs);
       console.log(`Refresh scheduled for ${(refreshTimeMs / 1000).toFixed(1)} seconds.`);
       return refreshTimeMs;
     }
@@ -331,30 +331,29 @@
     async function refresh() {
       console.log('Refreshing data.');
 
-      let data;
       try {
-        data = await fetchData();
+        const data = await fetchData();
+
+        ({ timestamps, hvac_actions } = data);
+
+        const traces = buildTraces(data.sensors, timestamps, data.readings);
+        const shapes = buildHvacShapes(timestamps, hvac_actions);
+
+        // Plotly.react updates data and layout without resetting the user's zoom.
+        Plotly.react(chartEl, traces, { ...chartEl.layout, shapes });
+
+        updateLastReading(timestamps.at(-1));
+        if (currentRange) {
+          updateStatus(currentRange[0], currentRange[1]);
+        } else {
+          updateStatus(timestamps[0], timestamps.at(-1));
+        }
       } catch {
-        return;  // silently skip failed refreshes; next interval will retry
+        // silently skip failed refreshes; next timeout will retry
+      } finally {
+        // Always schedule the next refresh, even if this one failed.
+        setTimeout(refresh, computeRefreshTimeMs());
       }
-
-      ({ timestamps, hvac_actions } = data);
-
-      const traces = buildTraces(data.sensors, timestamps, data.readings);
-      const shapes = buildHvacShapes(timestamps, hvac_actions);
-
-      // Plotly.react updates data and layout without resetting the user's zoom.
-      Plotly.react(chartEl, traces, { ...chartEl.layout, shapes });
-
-      updateLastReading(timestamps.at(-1));
-      if (currentRange) {
-        updateStatus(currentRange[0], currentRange[1]);
-      } else {
-        updateStatus(timestamps[0], timestamps.at(-1));
-      }
-
-      // Schedule the next refresh.
-      setTimeout(refresh, computeRefreshTimeMs());
     }
 
     load();
