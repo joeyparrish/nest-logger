@@ -197,12 +197,24 @@
 
       // ── Helpers ─────────────────────────────────────────────────────────────
 
+      // Parse a timestamp to UTC milliseconds.
+      // DB timestamps already carry a Z suffix and parse correctly.
+      // Plotly relayout range strings use a space separator and no timezone
+      // indicator — they represent UTC wall-clock time but new Date() would
+      // misread them as local time.  Normalise to a proper UTC ISO string first.
+      function toUtcMs(s) {
+        if (!s.endsWith('Z') && !s.includes('+')) {
+          s = s.trim().replace(' ', 'T') + 'Z';
+        }
+        return new Date(s).getTime();
+      }
+
       // Compute milliseconds spent in each HVAC state within [x0, x1].
       // Uses actual time between consecutive timestamps so gaps are handled
       // correctly and the durations always add up to the visible span.
       function computeHvacDurations(x0, x1) {
-        const rangeStart = new Date(x0).getTime();
-        const rangeEnd   = new Date(x1).getTime();
+        const rangeStart = toUtcMs(x0);
+        const rangeEnd   = toUtcMs(x1);
         const totals = { heat: 0, cool: 0, idle: 0 };
 
         for (let i = 0; i < timestamps.length - 1; i++) {
@@ -230,11 +242,11 @@
       }
 
       function updateStatus(x0, x1) {
-        const t0 = new Date(x0).getTime();
-        const t1 = new Date(x1).getTime();
+        const t0 = toUtcMs(x0);
+        const t1 = toUtcMs(x1);
 
         const visibleCount = timestamps.filter(ts => {
-          const t = new Date(ts).getTime();
+          const t = toUtcMs(ts);
           return t >= t0 && t <= t1;
         }).length;
 
