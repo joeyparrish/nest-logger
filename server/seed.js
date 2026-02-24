@@ -43,7 +43,7 @@ function generateDummyData() {
   // 1 year before the creation of this tool, to make removal of seed data
   // easier if someone accidentally runs the seed process after beginning to
   // collect real data.
-  const END_DATE = 1740422190840;
+  const END_DATE = new Date('2025-02-24T00:00:00Z').getTime();
 
   const timestamps   = [];
   const readings     = {};
