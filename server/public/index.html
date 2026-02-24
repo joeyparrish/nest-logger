@@ -57,6 +57,92 @@
     const statusEl      = document.getElementById('status');
     const lastReadingEl = document.getElementById('last-reading');
 
+    const REFRESH_INTERVAL_MS = 5 * 60 * 1000;  // match extension poll rate
+
+    // Current dataset — updated on every refresh so helpers always see fresh data.
+    let timestamps   = [];
+    let hvac_actions = [];
+
+    // The user's current zoom range.  null means full range (autorange).
+    // Tracked so updateStatus stays correct after a background refresh.
+    let currentRange = null;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // Parse a timestamp to UTC milliseconds.
+    // If it's from the database, it was normalized to a Date object.  If
+    // it's Plotly's obnoxious local time strings with no TZ info (given in
+    // the range when we zoom), we interpret as Date first.
+    function toUtcMs(s) {
+      if (s instanceof Date) return s.getTime();
+      return new Date(s).getTime();
+    }
+
+    // Compute milliseconds spent in each HVAC state within [x0, x1].
+    // Uses actual time between consecutive timestamps so gaps are handled
+    // correctly and the durations always add up to the visible span.
+    function computeHvacDurations(x0, x1) {
+      const rangeStart = toUtcMs(x0);
+      const rangeEnd   = toUtcMs(x1);
+      const totals = { heat: 0, cool: 0, idle: 0 };
+
+      for (let i = 0; i < timestamps.length - 1; i++) {
+        const segStart = timestamps[i].getTime();
+        const segEnd   = timestamps[i + 1].getTime();
+
+        if (segEnd <= rangeStart || segStart >= rangeEnd) continue;
+
+        const ms     = Math.min(segEnd, rangeEnd) - Math.max(segStart, rangeStart);
+        const action = hvac_actions[i] ?? 'idle';
+        totals[action] = (totals[action] ?? 0) + ms;
+      }
+
+      return totals;
+    }
+
+    function fmtDuration(ms) {
+      if (ms <= 0) return '0m';
+      const totalMin = Math.round(ms / 60000);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      if (h === 0) return `${m}m`;
+      if (m === 0) return `${h}h`;
+      return `${h}h ${m}m`;
+    }
+
+    function updateLastReading(lastTs) {
+      const ageMs  = Date.now() - toUtcMs(lastTs);
+      const ageMin = Math.floor(ageMs / 60000);
+      const ageH   = Math.floor(ageMin / 60);
+      const ageM   = ageMin % 60;
+
+      let age;
+      if (ageMin < 2)        age = 'just now';
+      else if (ageMin < 60)  age = `${ageMin} min ago`;
+      else if (ageM === 0)   age = `${ageH}h ago`;
+      else                   age = `${ageH}h ${ageM}m ago`;
+
+      lastReadingEl.textContent = `last reading: ${age}`;
+    }
+
+    function updateStatus(x0, x1) {
+      const t0 = toUtcMs(x0);
+      const t1 = toUtcMs(x1);
+
+      const visibleCount = timestamps.filter(ts => {
+        const t = toUtcMs(ts);
+        return t >= t0 && t <= t1;
+      }).length;
+
+      const d = computeHvacDurations(x0, x1);
+
+      statusEl.textContent =
+        `${visibleCount} readings in view  ·  ` +
+        `heating ${fmtDuration(d.heat)}  ·  ` +
+        `cooling ${fmtDuration(d.cool)}  ·  ` +
+        `idle ${fmtDuration(d.idle)}`;
+    }
+
     // ── HVAC shading ──────────────────────────────────────────────────────────
     //
     // Converts the flat hvac_actions array into Plotly layout.shapes —
@@ -105,25 +191,13 @@
       return shapes;
     }
 
-    // ── Main load ─────────────────────────────────────────────────────────────
+    // ── Data fetching ─────────────────────────────────────────────────────────
 
-    async function load() {
-      statusEl.textContent = 'Fetching data…';
+    async function fetchData() {
+      const resp = await fetch('/api/readings');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const { sensors, rows } = await resp.json();
 
-      let payload;
-      try {
-        const resp = await fetch('/api/readings');
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        payload = await resp.json();
-      } catch (err) {
-        statusEl.textContent = 'Error loading data: ' + err.message;
-        return;
-      }
-
-      const { sensors, rows } = payload;
-
-      // Derive flat parallel arrays from the row objects.  Because they all
-      // come from the same source array, alignment is guaranteed.
       // CRITICAL: map incoming timestamps (ISO strings in UTC) to Date
       // objects.  This normalizes rendering in the UI to local time, and
       // provides consistency between different data sources.  The ranges will
@@ -136,9 +210,13 @@
         sensors.map(name => [name, rows.map(r => r.sensors[name] ?? null)])
       );
 
+      return { sensors, timestamps, hvac_actions, readings };
+    }
+
+    function buildTraces(sensors, timestamps, readings) {
       // One scattergl (WebGL) trace per sensor for smooth rendering even with
       // year-scale datasets.
-      const traces = sensors.map(name => ({
+      return sensors.map(name => ({
         type: 'scattergl',
         mode: 'lines',
         name,
@@ -146,7 +224,24 @@
         y: readings[name],
         line: { width: 1.5 },
       }));
+    }
 
+    // ── Initial load ──────────────────────────────────────────────────────────
+
+    async function load() {
+      statusEl.textContent = 'Fetching data…';
+
+      let data;
+      try {
+        data = await fetchData();
+      } catch (err) {
+        statusEl.textContent = 'Error loading data: ' + err.message;
+        return;
+      }
+
+      ({ timestamps, hvac_actions } = data);
+
+      const traces = buildTraces(data.sensors, timestamps, data.readings);
       const shapes = buildHvacShapes(timestamps, hvac_actions);
 
       const layout = {
@@ -194,100 +289,52 @@
 
       Plotly.newPlot(chartEl, traces, layout, config);
 
-      // Set initial status for the full range, then keep it updated as the
-      // user zooms or pans.
       updateStatus(timestamps[0], timestamps.at(-1));
       updateLastReading(timestamps.at(-1));
-      setInterval(() => updateLastReading(timestamps.at(-1)), 60000);
 
       chartEl.on('plotly_relayout', (ev) => {
         if (ev['xaxis.autorange']) {
           // User reset zoom — show full range.
+          currentRange = null;
           updateStatus(timestamps[0], timestamps.at(-1));
         } else if (ev['xaxis.range[0]'] !== undefined) {
           // User zoomed or panned by click-drag or range-selector button.
-          updateStatus(ev['xaxis.range[0]'], ev['xaxis.range[1]']);
+          currentRange = [ev['xaxis.range[0]'], ev['xaxis.range[1]']];
+          updateStatus(currentRange[0], currentRange[1]);
         } else if (ev['xaxis.range'] !== undefined) {
           // User dragged the rangeslider handles — fires a different event shape.
-          updateStatus(ev['xaxis.range'][0], ev['xaxis.range'][1]);
+          currentRange = ev['xaxis.range'];
+          updateStatus(currentRange[0], currentRange[1]);
         }
         // Ignore unrelated relayout events (e.g. legend clicks, y-axis zoom).
       });
 
-      // ── Helpers ─────────────────────────────────────────────────────────────
+      setInterval(refresh, REFRESH_INTERVAL_MS);
+    }
 
-      // Parse a timestamp to UTC milliseconds.
-      // If it's from the database, it was normalized to a Date object.  If
-      // it's Plotly's obnoxious local time strings with no TZ info (given in
-      // the range when we zoom), we interpret as Date first.
-      function toUtcMs(s) {
-        if (s instanceof Date) return s.getTime();
-        return new Date(s).getTime();
+    // ── Background refresh ────────────────────────────────────────────────────
+
+    async function refresh() {
+      let data;
+      try {
+        data = await fetchData();
+      } catch {
+        return;  // silently skip failed refreshes; next interval will retry
       }
 
-      // Compute milliseconds spent in each HVAC state within [x0, x1].
-      // Uses actual time between consecutive timestamps so gaps are handled
-      // correctly and the durations always add up to the visible span.
-      function computeHvacDurations(x0, x1) {
-        const rangeStart = toUtcMs(x0);
-        const rangeEnd   = toUtcMs(x1);
-        const totals = { heat: 0, cool: 0, idle: 0 };
+      ({ timestamps, hvac_actions } = data);
 
-        for (let i = 0; i < timestamps.length - 1; i++) {
-          const segStart = new Date(timestamps[i]).getTime();
-          const segEnd   = new Date(timestamps[i + 1]).getTime();
+      const traces = buildTraces(data.sensors, timestamps, data.readings);
+      const shapes = buildHvacShapes(timestamps, hvac_actions);
 
-          if (segEnd <= rangeStart || segStart >= rangeEnd) continue;
+      // Plotly.react updates data and layout without resetting the user's zoom.
+      Plotly.react(chartEl, traces, { ...chartEl.layout, shapes });
 
-          const ms     = Math.min(segEnd, rangeEnd) - Math.max(segStart, rangeStart);
-          const action = hvac_actions[i] ?? 'idle';
-          totals[action] = (totals[action] ?? 0) + ms;
-        }
-
-        return totals;
-      }
-
-      function fmtDuration(ms) {
-        if (ms <= 0) return '0m';
-        const totalMin = Math.round(ms / 60000);
-        const h = Math.floor(totalMin / 60);
-        const m = totalMin % 60;
-        if (h === 0) return `${m}m`;
-        if (m === 0) return `${h}h`;
-        return `${h}h ${m}m`;
-      }
-
-      function updateLastReading(lastTs) {
-        const ageMs  = Date.now() - toUtcMs(lastTs);
-        const ageMin = Math.floor(ageMs / 60000);
-        const ageH   = Math.floor(ageMin / 60);
-        const ageM   = ageMin % 60;
-
-        let age;
-        if (ageMin < 2)        age = 'just now';
-        else if (ageMin < 60)  age = `${ageMin} min ago`;
-        else if (ageM === 0)   age = `${ageH}h ago`;
-        else                   age = `${ageH}h ${ageM}m ago`;
-
-        lastReadingEl.textContent = `last reading: ${age}`;
-      }
-
-      function updateStatus(x0, x1) {
-        const t0 = toUtcMs(x0);
-        const t1 = toUtcMs(x1);
-
-        const visibleCount = timestamps.filter(ts => {
-          const t = toUtcMs(ts);
-          return t >= t0 && t <= t1;
-        }).length;
-
-        const d = computeHvacDurations(x0, x1);
-
-        statusEl.textContent =
-          `${visibleCount} readings in view  ·  ` +
-          `heating ${fmtDuration(d.heat)}  ·  ` +
-          `cooling ${fmtDuration(d.cool)}  ·  ` +
-          `idle ${fmtDuration(d.idle)}`;
+      updateLastReading(timestamps.at(-1));
+      if (currentRange) {
+        updateStatus(currentRange[0], currentRange[1]);
+      } else {
+        updateStatus(timestamps[0], timestamps.at(-1));
       }
     }
 
