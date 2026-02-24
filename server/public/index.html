@@ -202,6 +202,8 @@
       // Plotly relayout range strings use a space separator and no timezone
       // indicator — they represent UTC wall-clock time but new Date() would
       // misread them as local time.  Normalise to a proper UTC ISO string first.
+      // Note that until you zoom, the range strings are actually in UTC ISO.
+      // It's very frustrating.
       function toUtcMs(s) {
         if (!s.endsWith('Z') && !s.includes('+')) {
           s = s.trim().replace(' ', 'T') + 'Z';
