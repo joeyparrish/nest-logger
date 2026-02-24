@@ -291,6 +291,7 @@
 
       updateStatus(timestamps[0], timestamps.at(-1));
       updateLastReading(timestamps.at(-1));
+      setInterval(() => updateLastReading(timestamps.at(-1)), 60000);
 
       chartEl.on('plotly_relayout', (ev) => {
         if (ev['xaxis.autorange']) {
