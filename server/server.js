@@ -64,7 +64,7 @@ app.post('/api/readings', (req, res) => {
 
 function queryReadings() {
   // Sensor names in stable first-seen order.
-  const sensors = db.prepare(`
+  const indoorSensors = db.prepare(`
     SELECT sensor
     FROM sensor_readings
     WHERE section = 'TEMPERATURE SENSORS'
@@ -72,11 +72,26 @@ function queryReadings() {
     ORDER BY MIN(timestamp), sensor
   `).pluck().all();
 
-  // All temperature readings in one pass.
+  // Include 'Weather' at the end if we have any outdoor temp data.
+  const hasOutdoor = db.prepare(`
+    SELECT 1 FROM sensor_readings WHERE section = 'OUTSIDE TEMP.' LIMIT 1
+  `).get();
+  const sensors = hasOutdoor ? [...indoorSensors, 'Weather'] : indoorSensors;
+
+  // All indoor temperature readings in one pass.
   const dbRows = db.prepare(`
     SELECT timestamp, sensor, value
     FROM sensor_readings
     WHERE section = 'TEMPERATURE SENSORS'
+    ORDER BY timestamp
+  `).all();
+
+  // Outdoor temperature readings, labelled 'Weather' regardless of the
+  // underlying sensor name Nest uses.
+  const outdoorRows = db.prepare(`
+    SELECT timestamp, 'Weather' AS sensor, value
+    FROM sensor_readings
+    WHERE section = 'OUTSIDE TEMP.'
     ORDER BY timestamp
   `).all();
 
@@ -90,7 +105,7 @@ function queryReadings() {
   // hvac_action so there is no separate parallel array that could fall out of
   // alignment with the timestamp list.
   const snapshotMap = new Map();
-  for (const { timestamp, sensor, value } of dbRows) {
+  for (const { timestamp, sensor, value } of [...dbRows, ...outdoorRows]) {
     if (!snapshotMap.has(timestamp)) {
       snapshotMap.set(timestamp, {
         timestamp,
