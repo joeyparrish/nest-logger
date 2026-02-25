@@ -102,6 +102,12 @@ Schema is defined **only in db.js** (`db.exec` runs on first import).
 Any script that imports `db.js` gets a fully initialized database, so there
 is no required startup order between server.js and seed.js.
 
+The `OUTSIDE TEMP.` section is stored as-is in the DB (with whatever sensor
+name Nest uses internally), but the `/api/readings` response renames it to
+`"Weather"` to distinguish it from a physical outside sensor in the
+`TEMPERATURE SENSORS` section.  The rename happens in `queryReadings()` in
+`server.js`, not in the scraper or the DB.
+
 ### Frontend auto-refresh
 
 The chart page refreshes data from the server automatically without a page
