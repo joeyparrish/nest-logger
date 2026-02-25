@@ -22,5 +22,8 @@ source "$NVM_DIR/nvm.sh"
 # Change to this folder.
 cd "$(dirname "$0")"
 
+# Install node modules.
+npm ci
+
 # Start the server.
 exec node server.js
