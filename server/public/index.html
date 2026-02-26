@@ -59,6 +59,70 @@
       font-size: 0.8rem;
       color: #aaa;
     }
+
+    #annotation-hint {
+      margin-top: 6px;
+      font-size: 0.8rem;
+      color: #ccc;
+    }
+
+    #annotation-form {
+      display: none;
+      margin-top: 10px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,.1);
+      padding: 12px 16px;
+    }
+
+    #annotation-form label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #444;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    #annotation-form-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    #annotation-time {
+      font-size: 0.85rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 4px 8px;
+    }
+
+    #annotation-note {
+      flex: 1;
+      min-width: 200px;
+      font-size: 0.85rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 4px 8px;
+    }
+
+    #annotation-save, #annotation-cancel {
+      font-size: 0.85rem;
+      padding: 4px 12px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+    }
+
+    #annotation-save   { background: #4a90d9; color: white; }
+    #annotation-save:hover   { background: #3a7bc8; }
+    #annotation-cancel { background: #eee; color: #555; }
+    #annotation-cancel:hover { background: #ddd; }
+
+    #annotation-status {
+      font-size: 0.8rem;
+      color: #888;
+    }
   </style>
 </head>
 <body>
@@ -68,11 +132,34 @@
   </div>
   <div id="status">Loading…</div>
   <div id="last-reading"></div>
+  <div id="annotation-hint"></div>
+  <div id="annotation-form">
+    <label>Add annotation</label>
+    <div id="annotation-form-row">
+      <input type="datetime-local" id="annotation-time" />
+      <input type="text" id="annotation-note" placeholder="Note…" />
+      <button id="annotation-save">Save</button>
+      <button id="annotation-cancel">Cancel</button>
+      <span id="annotation-status"></span>
+    </div>
+  </div>
 
   <script>
-    const chartEl       = document.getElementById('chart');
-    const statusEl      = document.getElementById('status');
-    const lastReadingEl = document.getElementById('last-reading');
+    const chartEl            = document.getElementById('chart');
+    const statusEl           = document.getElementById('status');
+    const lastReadingEl      = document.getElementById('last-reading');
+    const annotationHintEl   = document.getElementById('annotation-hint');
+    const annotationFormEl   = document.getElementById('annotation-form');
+    const annotationTimeEl   = document.getElementById('annotation-time');
+    const annotationNoteEl   = document.getElementById('annotation-note');
+    const annotationSaveEl   = document.getElementById('annotation-save');
+    const annotationCancelEl = document.getElementById('annotation-cancel');
+    const annotationStatusEl = document.getElementById('annotation-status');
+
+    // Detect Mac to show the right modifier key label in the hint.
+    const isMac  = navigator.platform.startsWith('Mac');
+    const modKey = isMac ? '⌘' : 'Ctrl';
+    annotationHintEl.textContent = `${modKey}+click on chart to add annotation`;
 
     const REFRESH_INTERVAL_MS = 5 * 60 * 1000;  // match extension poll rate
 
@@ -176,6 +263,59 @@
         `cooling ${fmtDuration(d.cool)}  ·  ` +
         `idle ${fmtDuration(d.idle)}`;
     }
+
+    // ── Annotation form ───────────────────────────────────────────────────────
+
+    // Format a Date as a datetime-local input value (YYYY-MM-DDTHH:MM, local time).
+    function toDatetimeLocalString(date) {
+      const pad = n => String(n).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+             `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function showAnnotationForm() {
+      annotationFormEl.style.display = 'block';
+      annotationNoteEl.focus();
+    }
+
+    function hideAnnotationForm() {
+      annotationFormEl.style.display = 'none';
+      annotationStatusEl.textContent = '';
+    }
+
+    async function saveAnnotation() {
+      const note = annotationNoteEl.value.trim();
+      if (!annotationTimeEl.value || !note) {
+        annotationStatusEl.textContent = 'Please fill in both fields.';
+        return;
+      }
+
+      // datetime-local value is local time — convert to UTC ISO for the server.
+      const timestamp = new Date(annotationTimeEl.value).toISOString();
+
+      annotationStatusEl.textContent = 'Saving…';
+      try {
+        const resp = await fetch('/api/annotations', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ timestamp, note }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        hideAnnotationForm();
+        refresh();  // redraw chart with the new annotation
+      } catch (err) {
+        annotationStatusEl.textContent = 'Save failed: ' + err.message;
+      }
+    }
+
+    annotationSaveEl.addEventListener('click', saveAnnotation);
+    annotationCancelEl.addEventListener('click', hideAnnotationForm);
+
+    // Submit on Enter in the note field; Escape cancels.
+    annotationNoteEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  saveAnnotation();
+      if (e.key === 'Escape') hideAnnotationForm();
+    });
 
     // ── Annotations ───────────────────────────────────────────────────────────
 
@@ -386,6 +526,22 @@
       updateStatus(timestamps[0], timestamps.at(-1));
       updateLastReading(timestamps.at(-1));
       setInterval(() => updateLastReading(timestamps.at(-1)), 60000);
+
+      chartEl.on('plotly_click', (ev) => {
+        // Ctrl+click (Windows/Linux) or Cmd+click (Mac) opens the annotation form.
+        // Regular clicks are left to Plotly for zoom/pan.
+        if (!(ev.event.ctrlKey || ev.event.metaKey)) return;
+
+        const x = ev.points[0]?.x;
+        if (!x) return;
+
+        // ev.points[0].x may be a Date object or a Plotly local-time string.
+        const date = x instanceof Date ? x : new Date(x);
+        annotationTimeEl.value = toDatetimeLocalString(date);
+        annotationNoteEl.value = '';
+        annotationStatusEl.textContent = '';
+        showAnnotationForm();
+      });
 
       chartEl.on('plotly_relayout', (ev) => {
         if (ev['xaxis.autorange']) {

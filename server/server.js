@@ -138,6 +138,20 @@ function queryReadings() {
   return { sensors, rows, annotations };
 }
 
+const insertAnnotation = db.prepare(`
+  INSERT OR REPLACE INTO annotations (timestamp, note) VALUES (?, ?)
+`);
+
+app.post('/api/annotations', (req, res) => {
+  const { timestamp, note } = req.body;
+  if (!timestamp || !note?.trim()) {
+    return res.status(400).json({ error: 'timestamp and note are required.' });
+  }
+  insertAnnotation.run(timestamp, note.trim());
+  console.log(`[POST /api/annotations] ${timestamp} — "${note.trim()}"`);
+  res.json({ ok: true });
+});
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 app.get('/api/readings', (req, res) => {
