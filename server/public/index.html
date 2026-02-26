@@ -79,6 +79,7 @@
     // Current dataset — updated on every refresh so helpers always see fresh data.
     let timestamps   = [];
     let hvac_actions = [];
+    let annotations  = [];
 
     // The user's current zoom range.  null means full range (autorange).
     // Tracked so updateStatus stays correct after a background refresh.
@@ -176,6 +177,44 @@
         `idle ${fmtDuration(d.idle)}`;
     }
 
+    // ── Annotations ───────────────────────────────────────────────────────────
+
+    // Vertical dotted line across the full chart height for each annotation.
+    function buildAnnotationShapes(annotations) {
+      return annotations.map(a => ({
+        type:  'line',
+        xref:  'x',
+        yref:  'paper',
+        x0:    new Date(a.timestamp),
+        x1:    new Date(a.timestamp),
+        y0:    0,
+        y1:    1,
+        layer: 'above',
+        line:  { color: 'rgba(120, 120, 120, 0.5)', width: 1, dash: 'dot' },
+      }));
+    }
+
+    // Marker trace pinned to the bottom of the chart via a hidden secondary
+    // y-axis.  Hovering shows the annotation note.
+    function buildAnnotationTrace(annotations) {
+      return {
+        type:          'scatter',
+        mode:          'markers',
+        name:          'Annotations',
+        yaxis:         'y2',
+        x:             annotations.map(a => new Date(a.timestamp)),
+        y:             annotations.map(() => 0.03),
+        text:          annotations.map(a => a.note),
+        // %{text} is Plotly's template syntax for the trace's `text` array.
+        // <extra></extra> controls the colored "trace name" badge that Plotly
+        // appends to hover labels by default.  An empty tag suppresses it,
+        // so only the annotation text itself appears on hover.
+        hovertemplate: '%{text}<extra></extra>',
+        marker:        { symbol: 'triangle-up', size: 10, color: '#888' },
+        showlegend:    false,
+      };
+    }
+
     // ── HVAC shading ──────────────────────────────────────────────────────────
     //
     // Converts the flat hvac_actions array into Plotly layout.shapes —
@@ -229,7 +268,7 @@
     async function fetchData() {
       const resp = await fetch('/api/readings');
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const { sensors, rows } = await resp.json();
+      const { sensors, rows, annotations } = await resp.json();
 
       // CRITICAL: map incoming timestamps (ISO strings in UTC) to Date
       // objects.  This normalizes rendering in the UI to local time, and
@@ -243,7 +282,7 @@
         sensors.map(name => [name, rows.map(r => r.sensors[name] ?? null)])
       );
 
-      return { sensors, timestamps, hvac_actions, readings };
+      return { sensors, timestamps, hvac_actions, readings, annotations };
     }
 
     function buildTraces(sensors, timestamps, readings) {
@@ -256,6 +295,13 @@
         x: timestamps,
         y: readings[name],
         line: { width: 1.5 },
+        // Show "value <SensorName>" in the unified hover tooltip.
+        // %{y} gives just the value without the x coordinate (which Plotly
+        // would append if the hovered timestamp doesn't exactly match a
+        // reading, e.g. when near an annotation).  <extra> controls the
+        // colored trace-name badge; we pass the name explicitly so it still
+        // appears even though we're overriding the default template.
+        hovertemplate: `%{y}<extra>${name}</extra>`,
       }));
     }
 
@@ -272,10 +318,16 @@
         return;
       }
 
-      ({ timestamps, hvac_actions } = data);
+      ({ timestamps, hvac_actions, annotations } = data);
 
-      const traces = buildTraces(data.sensors, timestamps, data.readings);
-      const shapes = buildHvacShapes(timestamps, hvac_actions);
+      const traces = [
+        ...buildTraces(data.sensors, timestamps, data.readings),
+        buildAnnotationTrace(annotations),
+      ];
+      const shapes = [
+        ...buildHvacShapes(timestamps, hvac_actions),
+        ...buildAnnotationShapes(annotations),
+      ];
 
       const layout = {
         shapes,
@@ -299,6 +351,15 @@
         yaxis: {
           title: { text: 'Temperature (°F)', standoff: 8 },
           fixedrange: false,
+        },
+
+        // Hidden secondary y-axis used only to pin annotation markers to a
+        // fixed position at the bottom of the chart, independent of y zoom.
+        yaxis2: {
+          overlaying: 'y',
+          range:      [0, 1],
+          visible:    false,
+          fixedrange: true,
         },
 
         legend: {
@@ -355,10 +416,16 @@
       try {
         const data = await fetchData();
 
-        ({ timestamps, hvac_actions } = data);
+        ({ timestamps, hvac_actions, annotations } = data);
 
-        const traces = buildTraces(data.sensors, timestamps, data.readings);
-        const shapes = buildHvacShapes(timestamps, hvac_actions);
+        const traces = [
+          ...buildTraces(data.sensors, timestamps, data.readings),
+          buildAnnotationTrace(annotations),
+        ];
+        const shapes = [
+          ...buildHvacShapes(timestamps, hvac_actions),
+          ...buildAnnotationShapes(annotations),
+        ];
 
         // Plotly.react updates data and layout without resetting the user's zoom.
         Plotly.react(chartEl, traces, { ...chartEl.layout, shapes });

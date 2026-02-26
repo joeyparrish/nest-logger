@@ -48,6 +48,11 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_sr_timestamp ON sensor_readings(timestamp);
+
+  CREATE TABLE IF NOT EXISTS annotations (
+    timestamp  TEXT PRIMARY KEY,
+    note       TEXT NOT NULL
+  );
 `);
 
 module.exports = db;

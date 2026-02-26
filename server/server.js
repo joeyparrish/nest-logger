@@ -131,7 +131,11 @@ function queryReadings() {
     }
   }
 
-  return { sensors, rows };
+  const annotations = db.prepare(`
+    SELECT timestamp, note FROM annotations ORDER BY timestamp
+  `).all();
+
+  return { sensors, rows, annotations };
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -140,7 +144,8 @@ app.get('/api/readings', (req, res) => {
   const data = queryReadings();
   console.log(
     `[/api/readings] ${data.rows.length} snapshots, ` +
-    `${data.sensors.length} sensors: [${data.sensors.join(', ')}]`
+    `${data.sensors.length} sensors: [${data.sensors.join(', ')}], ` +
+    `${data.annotations.length} annotation(s)`
   );
   res.json(data);
 });
