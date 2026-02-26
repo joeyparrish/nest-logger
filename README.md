@@ -3,8 +3,9 @@
 Log historical temperature readings from all Nest room sensors and graph them
 over time.  Each sensor appears as its own line on a time-series chart, with
 thermostat HVAC state (heating / cooling / idle) shown as background shading.
+Annotate your data directly in the chart.
 
-![Chart showing temperature lines with red/blue HVAC shading]
+![Chart showing temperature lines with red/blue HVAC shading](screenshot.png)
 
 ## How it works
 
