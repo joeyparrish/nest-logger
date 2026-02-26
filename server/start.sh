@@ -15,17 +15,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# Import NVM to get the best node version without hard-coding one.
-export NVM_DIR="$HOME/.nvm"
-source "$NVM_DIR/nvm.sh"
+if [ -d "$HOME/.nvm" ]; then
+  echo "Using NVM for node LTS."
+
+  # Import NVM to get the best node version without hard-coding one.
+  export NVM_DIR="$HOME/.nvm"
+  source "$NVM_DIR/nvm.sh"
+
+  # Set LTS node.
+  nvm use --lts
+fi
 
 # Change to this folder.
 cd "$(dirname "$0")"
 
-# Set LTS node.
-nvm use --lts
-
-# Install node modules.
+# Install node modules again, so the native ones match the running node version.
 npm ci
 
 # Start the server.
