@@ -11,7 +11,7 @@ Annotate your data directly in the chart.
 
 A Chrome extension scrapes the [home.nest.com](https://home.nest.com) web app
 every 5 minutes and POSTs the readings to a small Express server running on
-your local machine.  The server stores everything in a SQLite database and
+your local machine.  The server stores everything in an SQLite database and
 serves an interactive Plotly.js chart.
 
 ```
