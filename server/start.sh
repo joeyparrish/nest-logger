@@ -22,6 +22,9 @@ source "$NVM_DIR/nvm.sh"
 # Change to this folder.
 cd "$(dirname "$0")"
 
+# Set LTS node.
+nvm use --lts
+
 # Install node modules.
 npm ci
 
