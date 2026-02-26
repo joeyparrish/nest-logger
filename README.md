@@ -115,6 +115,9 @@ systemctl --user stop nest-logger
   was collected, updated every minute.
 - **Auto-refresh** — the chart fetches new data automatically, timed to arrive
   shortly after each new reading is expected from the extension.
+- **Annotations** — Ctrl+click (or ⌘+click on Mac) on any data point opens
+  an annotation form pre-filled with the clicked timestamp.  Annotations appear
+  as dotted vertical lines with triangle markers; hovering shows the note text.
 
 ## Development
 

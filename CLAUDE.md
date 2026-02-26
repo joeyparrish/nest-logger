@@ -96,6 +96,10 @@ sensor_readings (timestamp, section, sensor, value)
 hvac_states (timestamp, action)
   -- action: 'heat' | 'cool' | 'idle'
   -- one row per poll cycle
+
+annotations (timestamp, note)
+  -- user-created notes anchored to a point in time
+  -- timestamp PRIMARY KEY (one annotation per timestamp)
 ```
 
 Schema is defined **only in db.js** (`db.exec` runs on first import).
@@ -130,6 +134,29 @@ depending on how the user zooms:
 - Rangeslider handle drag → `ev['xaxis.range']` (array)
 
 Both cases are handled explicitly in the relayout listener.
+
+### Annotations
+
+Annotations are user-created notes anchored to a UTC timestamp.  They are
+stored in the `annotations` table and returned alongside sensor data in the
+`/api/readings` response.  A separate `POST /api/annotations` endpoint accepts
+`{ timestamp, note }` to create or replace an annotation.
+
+On the chart, each annotation is rendered as:
+- A vertical dotted grey line spanning the full chart height
+- A small triangle marker pinned to the bottom of the chart via a hidden
+  secondary y-axis (`yaxis2`), so it stays at the bottom regardless of y zoom
+- A hover tooltip showing the note text
+
+**Adding annotations from the chart:** Ctrl+click (Windows/Linux) or
+⌘+click (Mac) on any data point opens an annotation form below the chart,
+pre-filled with the clicked timestamp.  Enter to save, Escape or Cancel to
+dismiss.  The chart refreshes immediately after a successful save.
+
+The `hovertemplate` on annotation markers uses `%{text}<extra></extra>`:
+- `%{text}` — Plotly template variable for the trace's `text` array
+- `<extra></extra>` — suppresses the colored trace-name badge Plotly normally
+  appends to hover labels, leaving only the note text
 
 ### Seed / dummy data
 
