@@ -25,12 +25,105 @@
  * would block fetch calls to non-Nest origins.
  *
  * The server origin must be listed in host_permissions in manifest.json.
+ *
+ * Reliability:
+ *   Watchdog alarm (every 6 min): reloads the Nest tab if no reading has been
+ *   received in more than WATCHDOG_GRACE_MS.  Cold starts are detected via
+ *   WORKER_START_TIME (an in-memory constant that resets on every cold start)
+ *   and skipped to avoid spurious reloads.
+ *
+ *   Daily reload alarm (~3 am local): proactively reloads the Nest tab once
+ *   per day to clear accumulated DOM/JS heap from the long-running SPA.
  */
 
-const PREFIX     = "[Nest Scraper / background]";
-const INGEST_URL = "http://127.0.0.1:51920/api/readings";
+// Set once per service worker lifetime.  Resets on cold start, which is how
+// we detect that case in the watchdog handler.
+const WORKER_START_TIME = Date.now();
+
+const PREFIX          = "[Nest Scraper / background]";
+const INGEST_URL      = "http://127.0.0.1:51920/api/readings";
+
+// Must match POLL_INTERVAL_MS in scraper.js.
+const POLL_INTERVAL_MS    = 5 * 60 * 1000;
+// Two missed cycles plus one minute of grace.
+const WATCHDOG_GRACE_MS   = POLL_INTERVAL_MS * 2 + 60_000;
 
 console.log(PREFIX, "Service worker started.");
+
+// ── Startup ───────────────────────────────────────────────────────────────────
+
+// Watchdog fires every 6 minutes.  Recreated on every startup; relative
+// timing is fine for a sub-hourly periodic alarm.
+chrome.alarms.create('watchdog', { periodInMinutes: 6 });
+
+// Daily reload fires at ~3 am local time.  Only created if it doesn't already
+// exist so the scheduled time doesn't drift on service worker restarts.
+chrome.alarms.get('daily-reload', (alarm) => {
+  if (!alarm) {
+    chrome.alarms.create('daily-reload', {
+      when:           next3amMs(),
+      periodInMinutes: 24 * 60,
+    });
+    console.log(PREFIX, "Scheduled daily reload at", new Date(next3amMs()).toLocaleString());
+  }
+});
+
+/** Returns the Unix timestamp (ms) of the next 3:00 am in local time. */
+function next3amMs() {
+  const now  = new Date();
+  const next = new Date(now);
+  next.setHours(3, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next.getTime();
+}
+
+// ── Alarm handler ─────────────────────────────────────────────────────────────
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'watchdog') {
+    await handleWatchdog();
+  } else if (alarm.name === 'daily-reload') {
+    await reloadNestTab('Daily reload');
+  }
+});
+
+async function handleWatchdog() {
+  // On a cold start the service worker hasn't had time to receive a reading
+  // yet, so lastReading in storage may legitimately look stale.  Skip.
+  const workerUptime = Date.now() - WORKER_START_TIME;
+  if (workerUptime < POLL_INTERVAL_MS) {
+    console.log(PREFIX, "Watchdog: cold start — skipping stale check.");
+    return;
+  }
+
+  const { lastReading } = await chrome.storage.local.get('lastReading');
+  if (!lastReading) {
+    console.warn(PREFIX, "Watchdog: no lastReading in storage yet — skipping.");
+    return;
+  }
+
+  const ageMs  = Date.now() - lastReading;
+  const ageMin = Math.round(ageMs / 60_000);
+  if (ageMs > WATCHDOG_GRACE_MS) {
+    console.warn(PREFIX, `Watchdog: last reading was ${ageMin} min ago — reloading Nest tab.`);
+    await reloadNestTab('Watchdog');
+  } else {
+    console.log(PREFIX, `Watchdog: last reading ${ageMin} min ago — OK.`);
+  }
+}
+
+/** Finds all home.nest.com tabs and reloads them. */
+async function reloadNestTab(reason) {
+  const tabs = await chrome.tabs.query({ url: 'https://home.nest.com/*' });
+  if (tabs.length === 0) {
+    console.log(PREFIX, `${reason}: no Nest tab open, nothing to reload.`);
+    return;
+  }
+  for (const tab of tabs) {
+    console.log(PREFIX, `${reason}: reloading tab ${tab.id}.`);
+    chrome.tabs.reload(tab.id);
+  }
+}
 
 // ── Message handler ───────────────────────────────────────────────────────────
 
@@ -38,6 +131,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type !== "NEST_READING") return;
 
   const { timestamp, data, hvac_action } = message;
+
+  // Record the time of this reading so the watchdog can detect silence.
+  chrome.storage.local.set({ lastReading: Date.now() });
 
   // Log every received data point for verification.
   console.log(PREFIX, `Received reading at ${timestamp} (hvac: ${hvac_action}):`);
