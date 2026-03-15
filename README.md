@@ -62,7 +62,10 @@ begin scraping every 5 minutes.  You should see readings appear in the chart
 within a few minutes.
 
 > **Note:** The tab must remain open for data to be collected.  The server
-> runs independently and does not need the tab to serve the chart.
+> runs independently and does not need the tab to serve the chart.  The
+> extension monitors itself: if no reading arrives for more than 10 minutes it
+> automatically reloads the tab, and the tab is also reloaded once a day around
+> 3 am to clear accumulated memory, just in case of an unknown leak.
 
 ## Running the server at boot (Linux + systemd)
 
