@@ -48,6 +48,11 @@ const POLL_INTERVAL_MS    = 5 * 60 * 1000;
 // Two missed cycles plus one minute of grace.
 const WATCHDOG_GRACE_MS   = POLL_INTERVAL_MS * 2 + 60_000;
 
+// Tracks the last time a NEST_READING was received.  In-memory is fine:
+// on a cold start this is 0, but WORKER_START_TIME is fresh so the watchdog
+// skips the stale check until a real reading arrives.
+let lastReadingTime = 0;
+
 console.log(PREFIX, "Service worker started.");
 
 // ── Startup ───────────────────────────────────────────────────────────────────
@@ -96,13 +101,12 @@ async function handleWatchdog() {
     return;
   }
 
-  const { lastReading } = await chrome.storage.local.get('lastReading');
-  if (!lastReading) {
-    console.warn(PREFIX, "Watchdog: no lastReading in storage yet — skipping.");
+  if (!lastReadingTime) {
+    console.warn(PREFIX, "Watchdog: no reading received yet — skipping.");
     return;
   }
 
-  const ageMs  = Date.now() - lastReading;
+  const ageMs  = Date.now() - lastReadingTime;
   const ageMin = Math.round(ageMs / 60_000);
   if (ageMs > WATCHDOG_GRACE_MS) {
     console.warn(PREFIX, `Watchdog: last reading was ${ageMin} min ago — reloading Nest tab.`);
@@ -133,7 +137,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const { timestamp, data, hvac_action } = message;
 
   // Record the time of this reading so the watchdog can detect silence.
-  chrome.storage.local.set({ lastReading: Date.now() });
+  lastReadingTime = Date.now();
 
   // Log every received data point for verification.
   console.log(PREFIX, `Received reading at ${timestamp} (hvac: ${hvac_action}):`);
