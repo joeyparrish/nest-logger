@@ -187,7 +187,7 @@
       // conditions.  If data is already stale, retry in 30s rather than
       // immediately (which would cause a tight refresh loop).
       const computed = REFRESH_INTERVAL_MS + 1000 - latestDataAgeMs;
-      const refreshTimeMs = computed > 0 ? computed : 30000;
+      const refreshTimeMs = computed > 0 ? computed : REFRESH_INTERVAL_MS;
       console.log(`Refresh scheduled for ${(refreshTimeMs / 1000).toFixed(1)} seconds.`);
       return refreshTimeMs;
     }
