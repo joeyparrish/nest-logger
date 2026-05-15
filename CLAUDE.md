@@ -64,7 +64,9 @@ Chosen over Grafana+InfluxDB because the HVAC background shading requirement
 (semi-transparent coloured time-range bands overlaid on the temperature lines)
 maps directly to Plotly's `layout.shapes` API.  Grafana's time-series panel
 only supports horizontal threshold bands, not arbitrary time-range fills.
-`scattergl` (WebGL) traces handle year-scale datasets without performance issues.
+`scatter` (SVG) traces are used; `scattergl` (WebGL) was tried but lines
+failed to render in Chrome despite hover detection still working, a known
+WebGL rendering bug in Plotly 2.27.0.
 
 ### Timestamp handling
 

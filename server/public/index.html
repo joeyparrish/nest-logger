@@ -431,7 +431,7 @@
       // One scattergl (WebGL) trace per sensor for smooth rendering even with
       // year-scale datasets.
       return sensors.map(name => ({
-        type: 'scattergl',
+        type: 'scatter',
         mode: 'lines',
         name,
         x: timestamps,
