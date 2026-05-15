@@ -42,12 +42,18 @@
   // Matches URL paths like /thermostat/DEVICE_6416660000FB4E45
   const THERMOSTAT_PATH_RE = /\/thermostat\/DEVICE_/;
 
+  const LOGIN_BTN_SELECTOR = 'button[data-test="google-button-login"]';
+
   // The container element that holds the sensor carousel panel.
   const CONTAINER_SELECTOR = '[data-test="thermozilla-aag-carousel-container"]';
 
   console.log(PREFIX, "Content script loaded. Path:", window.location.pathname);
 
   // ── Utilities ──────────────────────────────────────────────────────────────
+
+  function isOnLoginPage() {
+    return window.location.pathname.startsWith('/login');
+  }
 
   function isOnThermostatPage() {
     return THERMOSTAT_PATH_RE.test(window.location.pathname);
@@ -71,6 +77,25 @@
         }
       })();
     });
+  }
+
+  // ── Login ──────────────────────────────────────────────────────────────────
+
+  async function clickGoogleLogin() {
+    console.log(PREFIX, "Login page detected — waiting for Google login button...");
+    let button;
+    try {
+      button = await waitFor(
+        () => document.querySelector(LOGIN_BTN_SELECTOR),
+        500,
+        15000
+      );
+    } catch {
+      console.error(PREFIX, "Timed out waiting for Google login button.");
+      return;
+    }
+    console.log(PREFIX, "Clicking Google login button.");
+    button.click();
   }
 
   // ── Navigation ─────────────────────────────────────────────────────────────
@@ -248,7 +273,9 @@
 
   // ── Entry point ────────────────────────────────────────────────────────────
 
-  if (isOnThermostatPage()) {
+  if (isOnLoginPage()) {
+    clickGoogleLogin();
+  } else if (isOnThermostatPage()) {
     console.log(PREFIX, "On thermostat page. Starting poll loop (every",
       POLL_INTERVAL_MS / 1000, "s).");
     poll();
