@@ -16,6 +16,11 @@
       "matches": ["https://home.nest.com/*"],
       "js": ["scraper.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://accounts.google.com/*"],
+      "js": ["google-login.js"],
+      "run_at": "document_idle"
     }
   ],
 
