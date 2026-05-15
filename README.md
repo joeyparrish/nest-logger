@@ -16,11 +16,16 @@ serves an interactive Plotly.js chart.
 
 ```
 home.nest.com tab
-  └─ Chrome extension (scraper.js + background.js)
+  └─ Chrome extension
+       ├─ scraper.js    — scrapes sensor data every 5 min; auto-clicks Google login if session expires
+       ├─ background.js — service worker; POSTs readings to the local server
        └─ POST /api/readings
             └─ Express server (server.js)
                  ├─ SQLite database (nest.db)
                  └─ Plotly.js chart (localhost:51920)
+
+accounts.google.com (during login only)
+  └─ google-login.js — auto-clicks account picker when redirect_uri points back to Nest
 ```
 
 ## Requirements
@@ -56,16 +61,24 @@ chart (it will be empty until the extension sends its first reading).
 2. Enable **Developer mode** (toggle in the top-right corner).
 3. Click **Load unpacked** and select the `extension/` folder from this repo.
 
-Once loaded, navigate to [home.nest.com](https://home.nest.com) in a tab and
-log in.  The extension will automatically navigate to your thermostat page and
-begin scraping every 5 minutes.  You should see readings appear in the chart
-within a few minutes.
+Once loaded, navigate to [home.nest.com](https://home.nest.com) in a tab.
+The extension handles the rest automatically:
+
+- If the tab is on the login page, the extension clicks **Sign in with Google**.
+- On the Google account picker, the extension clicks your account (it only
+  does this when the sign-in flow is redirecting back to Nest, so other
+  Google sign-ins are unaffected).
+- Once logged in, the extension navigates to your thermostat page and begins
+  scraping every 5 minutes.
+
+You should see readings appear in the chart within a few minutes.
 
 > **Note:** The tab must remain open for data to be collected.  The server
 > runs independently and does not need the tab to serve the chart.  The
 > extension monitors itself: if no reading arrives for more than 10 minutes it
 > automatically reloads the tab, and the tab is also reloaded once a day around
-> 3 am to clear accumulated memory, just in case of an unknown leak.
+> 3 am.  If the Nest session has expired, the reload triggers the automatic
+> login flow above.
 
 ## Running the server at boot (Linux + systemd)
 

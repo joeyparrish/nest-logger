@@ -25,12 +25,16 @@
  * helper to poll the DOM until the expected element appears.
  *
  * Flow:
- *   1. If the current URL is NOT a thermostat page (/thermostat/DEVICE_…),
+ *   1. If the current URL is a login page (/login/…), wait for the Google
+ *      sign-in button and click it.  The Google account picker is handled by
+ *      google-login.js on accounts.google.com.
+ *   2. If the current URL is NOT a thermostat page (/thermostat/DEVICE_…),
  *      search the DOM for a thermostat link and navigate to it.
- *   2. If the URL IS a thermostat page, wait for the carousel container to
+ *   3. If the URL IS a thermostat page, wait for the carousel container to
  *      appear, then scrape section headers + sensor rows.
- *   3. Log the structured reading to the console.
- *   4. Repeat step 2–3 every POLL_INTERVAL_MS (5 minutes).
+ *   4. Send the reading to the background service worker, which POSTs it to
+ *      the local server.
+ *   5. Repeat steps 3–4 every POLL_INTERVAL_MS (5 minutes).
  */
 
 (function () {

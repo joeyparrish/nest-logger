@@ -13,8 +13,9 @@ the same chart.
 
 ```
 Chrome extension (home.nest.com tab)
-  scraper.js          — content script, scrapes the DOM every 5 min
+  scraper.js          — content script, scrapes the DOM every 5 min; auto-clicks Google login button on /login/ pages
   background.js       — service worker, receives readings and POSTs to server
+  google-login.js     — content script on accounts.google.com, auto-clicks account picker when redirect_uri contains 'nest'
 
 Express server (local network, http://127.0.0.1:51920)
   server.js           — serves the chart page and /api/readings endpoint
@@ -204,11 +205,18 @@ systemctl --user restart nest-logger
 ```
 extension/
   manifest.json     — MV3, host_permissions: home.nest.com + 127.0.0.1:51920
-  scraper.js        — content script (document_idle), scrapes carousel DOM
+  scraper.js        — content script on home.nest.com (document_idle); handles login, navigation, scraping
   background.js     — service worker, receives NEST_READING messages, POSTs to server
+  google-login.js   — content script on accounts.google.com (document_idle); auto-clicks account picker
 ```
 
 **To install:** `chrome://extensions` → Load unpacked → select `extension/`
+
+**Login recovery flow:**
+1. If the Nest tab lands on `/login/`, `scraper.js` waits for `button[data-test="google-button-login"]` and clicks it.
+2. Google redirects to `accounts.google.com` with a `redirect_uri` pointing back to Nest.
+3. `google-login.js` checks `redirect_uri` for `'nest'`; if found, waits for `[data-email]` and clicks it.
+4. Google completes OAuth and returns to home.nest.com, where `scraper.js` takes over normally.
 
 The scraper navigates to a `/thermostat/DEVICE_*` URL if not already there,
 then waits for `[data-test="thermozilla-aag-carousel-container"]` to appear,
